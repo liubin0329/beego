@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const VERSION = "0.7.2"
+const VERSION = "0.9.0"
 
 var (
 	BeeApp        *App
@@ -32,20 +32,22 @@ var (
 	AppConfig     *Config
 	//related to session
 	GlobalSessions       *session.Manager //GlobalSessions
-	SessionOn            bool             // wheather auto start session,default is false
+	SessionOn            bool             // whether auto start session,default is false
 	SessionProvider      string           // default session provider  memory mysql redis
 	SessionName          string           // sessionName cookie's name
 	SessionGCMaxLifetime int64            // session's gc maxlifetime
 	SessionSavePath      string           // session savepath if use mysql/redis/file this set to the connectinfo
 	UseFcgi              bool
 	MaxMemory            int64
-	EnableGzip           bool // enable gzip
-	DirectoryIndex       bool //ebable DirectoryIndex default is false
-	EnbaleHotUpdate      bool //enable HotUpdate default is false
-	HttpServerTimeOut    int64
-	ErrorsShow           bool
-	XSRFKEY              string
-	CopyRequestBody      bool
+	EnableGzip           bool   // enable gzip
+	DirectoryIndex       bool   //enable DirectoryIndex default is false
+	EnableHotUpdate      bool   //enable HotUpdate default is false
+	HttpServerTimeOut    int64  //set httpserver timeout
+	ErrorsShow           bool   //set weather show errors
+	XSRFKEY              string //set XSRF
+	EnableXSRF           bool
+	XSRFExpire           int
+	CopyRequestBody      bool //When in raw application, You want to the reqeustbody
 )
 
 func init() {
@@ -75,7 +77,9 @@ func init() {
 	HttpServerTimeOut = 0
 	ErrorsShow = true
 	XSRFKEY = "beegoxsrf"
+	XSRFExpire = 60
 	ParseConfig()
+	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
 type App struct {
@@ -102,7 +106,7 @@ func (app *App) Run() {
 		}
 		err = fcgi.Serve(l, app.Handlers)
 	} else {
-		if EnbaleHotUpdate {
+		if EnableHotUpdate {
 			server := &http.Server{
 				Handler:      app.Handlers,
 				ReadTimeout:  time.Duration(HttpServerTimeOut) * time.Second,
@@ -133,8 +137,13 @@ func (app *App) Run() {
 	}
 }
 
-func (app *App) Router(path string, c ControllerInterface) *App {
-	app.Handlers.Add(path, c)
+func (app *App) Router(path string, c ControllerInterface, mappingMethods ...string) *App {
+	app.Handlers.Add(path, c, mappingMethods...)
+	return app
+}
+
+func (app *App) AutoRouter(c ControllerInterface) *App {
+	app.Handlers.AddAuto(c)
 	return app
 }
 
@@ -150,6 +159,21 @@ func (app *App) FilterParam(param string, filter http.HandlerFunc) *App {
 
 func (app *App) FilterPrefixPath(path string, filter http.HandlerFunc) *App {
 	app.Handlers.FilterPrefixPath(path, filter)
+	return app
+}
+
+func (app *App) FilterAfter(filter http.HandlerFunc) *App {
+	app.Handlers.FilterAfter(filter)
+	return app
+}
+
+func (app *App) FilterParamAfter(param string, filter http.HandlerFunc) *App {
+	app.Handlers.FilterParamAfter(param, filter)
+	return app
+}
+
+func (app *App) FilterPrefixPathAfter(path string, filter http.HandlerFunc) *App {
+	app.Handlers.FilterPrefixPathAfter(path, filter)
 	return app
 }
 
@@ -181,14 +205,19 @@ func RegisterController(path string, c ControllerInterface) *App {
 	return BeeApp
 }
 
-func Router(rootpath string, c ControllerInterface) *App {
-	BeeApp.Router(rootpath, c)
+func Router(rootpath string, c ControllerInterface, mappingMethods ...string) *App {
+	BeeApp.Router(rootpath, c, mappingMethods...)
 	return BeeApp
 }
 
 func RESTRouter(rootpath string, c ControllerInterface) *App {
 	Router(rootpath, c)
 	Router(path.Join(rootpath, ":objectId"), c)
+	return BeeApp
+}
+
+func AutoRouter(c ControllerInterface) *App {
+	BeeApp.AutoRouter(c)
 	return BeeApp
 }
 
@@ -232,6 +261,21 @@ func FilterPrefixPath(path string, filter http.HandlerFunc) *App {
 	return BeeApp
 }
 
+func FilterAfter(filter http.HandlerFunc) *App {
+	BeeApp.FilterAfter(filter)
+	return BeeApp
+}
+
+func FilterParamAfter(param string, filter http.HandlerFunc) *App {
+	BeeApp.FilterParamAfter(param, filter)
+	return BeeApp
+}
+
+func FilterPrefixPathAfter(path string, filter http.HandlerFunc) *App {
+	BeeApp.FilterPrefixPathAfter(path, filter)
+	return BeeApp
+}
+
 func Run() {
 	if AppConfigPath != path.Join(AppPath, "conf", "app.conf") {
 		err := ParseConfig()
@@ -255,7 +299,6 @@ func Run() {
 			Warn(err)
 		}
 	}
-	runtime.GOMAXPROCS(runtime.NumCPU())
 	registerErrorHander()
 	BeeApp.Run()
 }

@@ -4,25 +4,25 @@
 
 **导航**
 
-- [最小应用](#-1)
-- [新建项目](#-2)
-- [开发模式](#-3)
-- [路由设置](#-4)
-- [静态文件](#-5)
-- [过滤和中间件](#-6)
-- [Controller设计](#-7)
-- [模板处理](#-8)
-- [request处理](#request)
-- [跳转和错误](#-15)
-- [response处理](#response)
-- [Sessions](#sessions)
-- [Cache设置](#cache)
-- [安全的Map](#map)
-- [日志处理](#-16)
-- [配置管理](#-17)
-- [beego参数](#-18)
-- [第三方应用集成](#-19)
-- [部署编译应用](#-20)
+- [最小应用](#%E6%9C%80%E5%B0%8F%E5%BA%94%E7%94%A8)
+- [新建项目](#%E6%96%B0%E5%BB%BA%E9%A1%B9%E7%9B%AE)
+- [开发模式](#%E5%BC%80%E5%8F%91%E6%A8%A1%E5%BC%8F)
+- [路由设置](#%E8%B7%AF%E7%94%B1%E8%AE%BE%E7%BD%AE)
+- [静态文件](#%E9%9D%99%E6%80%81%E6%96%87%E4%BB%B6)
+- [过滤和中间件](#%E8%BF%87%E6%BB%A4%E5%92%8C%E4%B8%AD%E9%97%B4%E4%BB%B6)
+- [Controller设计](#%E6%8E%A7%E5%88%B6%E5%99%A8%E8%AE%BE%E8%AE%A1)
+- [模板处理](#%E6%A8%A1%E6%9D%BF%E5%A4%84%E7%90%86)
+- [request处理](#request%E5%A4%84%E7%90%86)
+- [跳转和错误](#%E8%B7%B3%E8%BD%AC%E5%92%8C%E9%94%99%E8%AF%AF)
+- [response处理](#response%E5%A4%84%E7%90%86)
+- [Sessions/Flash](#sessionsflash)
+- [Cache设置](#cache%E8%AE%BE%E7%BD%AE)
+- [安全的Map](#%E5%AE%89%E5%85%A8%E7%9A%84map)
+- [日志处理](#%E6%97%A5%E5%BF%97%E5%A4%84%E7%90%86)
+- [配置管理](#%E9%85%8D%E7%BD%AE%E7%AE%A1%E7%90%86)
+- [beego参数](#%E7%B3%BB%E7%BB%9F%E9%BB%98%E8%AE%A4%E5%8F%82%E6%95%B0)
+- [第三方应用集成](#%E7%AC%AC%E4%B8%89%E6%96%B9%E5%BA%94%E7%94%A8%E9%9B%86%E6%88%90)
+- [部署编译应用](#%E9%83%A8%E7%BD%B2%E7%BC%96%E8%AF%91%E5%BA%94%E7%94%A8)
 
 
 ## 最小应用
@@ -76,7 +76,7 @@
 
 通过如下命令创建beego项目，首先进入gopath目录
 
-	bee create hello
+	bee new hello
 
 这样就建立了一个项目hello，目录结构如下所示
 
@@ -101,11 +101,11 @@
 
 我们可以通过如下的方式改变我们的模式：
 
-	beego.RunMode = "pro"
+	beego.RunMode = "prod"
 
 或者我们在conf/app.conf下面设置如下：
 
-	runmode = pro
+	runmode = prod
 
 以上两种效果一样。
 
@@ -115,13 +115,15 @@
 
 		2013/04/13 19:36:17 [W] [stat views: no such file or directory]
 
-- 模板会自动重新加载不缓存。
+- 模板每次使用都会重新加载，不进行缓存。
 - 如果服务端出错，那么就会在浏览器端显示如下类似的截图：
 
 ![](images/dev.png)
 
 
 ## 路由设置
+
+### 默认路由RESTFul规则
 
 路由的主要功能是实现从请求地址到实现方法，beego中封装了`Controller`，所以路由是从路径到`ControllerInterface`的过程，`ControllerInterface`的方法有如下：
 
@@ -178,6 +180,66 @@
 	this.Ctx.Params[":splat"]
 	this.Ctx.Params[":path"]
 	this.Ctx.Params[":ext"]
+
+### 自定义方法及RESTFul规则
+上面列举的是默认的请求方法名(请求的method和函数名一致，例如GET请求执行Get函数，POST请求执行Post函数)，如果用户期望自定义函数名，那么可以使用如下方式：
+
+	beego.Router("/",&IndexController{},"*:Index")
+	
+使用第三个参数，第三个参数就是用来设置对应method到函数名，定义如下
+
+- *表示任意的method都执行该函数
+- 使用`httpmethod:funcname`格式来展示
+- 多个不同的格式使用`;`分割
+- 多个method对应同一个funcname，method之间通过`,`来分割	
+
+以下是一个RESTful的设计如下
+
+- beego.Router("/api/list",&RestController{},"*:ListFood")
+- beego.Router("/api/create",&RestController{},"post:CreateFood")
+- beego.Router("/api/update",&RestController{},"put:UpdateFood")
+- beego.Router("/api/delete",&RestController{},"delete:DeleteFood")
+
+以下是多个http method指向同一个函数
+	
+	beego.Router("/api",&RestController{},"get,post:ApiFunc")
+
+一下是不同的method对应不同的函数，通过`;`进行分割
+
+	beego.Router("/simple",&SimpleController{},"get:GetFunc;post:PostFunc")
+	
+可用的http method
+- * ：包含一下所有的函数
+- get ：GET请求
+- post ：POST请求
+- put ：PUT请求
+- delete ：DELETE请求
+- patch  ：PATCH请求
+- options ：OPTIONS请求
+- head	：HEAD请求
+
+>>>如果同时存在*和对应的http method，那么优先执行http method的方法，例如同时注册了如下所示的路由：
+
+>>> beego.Router("/simple",&SimpleController{},"*:AllFunc;post:PostFunc")
+
+>>>那么执行POST请求的时候，执行PostFunc而不执行AllFunc
+
+### 自动化路由
+用户首先需要把需要路由的控制器注册到自动路由中：
+
+	beego.AutoRouter(&controllers.ObjectController{})
+
+那么beego就会通过反射获取该结构体中所有的实现方法，你就可以通过如下的方式访问到对应的方法中：
+
+	/object/login   调用ObjectController中的Login方法
+	/object/logout  调用ObjectController中的Logout方法
+	
+除了前缀两个/:controller/:method的匹配之外，剩下的url，beego会帮你自动化解析为参数，保存在`this.Ctx.Params`当中：
+
+	/object/blog/2013/09/12  调用ObjectController中的Blog方法，参数如下：map[0:2013 1:09 2:12]
+	
+	
+>>> 方法名在内部是保存了用户设置的，例如Login，url匹配的时候都会转化为小写，所以，/object/LOGIN这样的url也一样可以路由到用户定义的Login方法中
 
 
 ## 静态文件
@@ -343,7 +405,7 @@ main.go文件中设置如下：
 
 模板中的数据是通过在Controller中`this.Data`获取的，所以如果你想在模板中获取内容`{{.Content}}`,那么你需要在Controller中如下设置：
 
-	this.Data["Context"] = "value"
+	this.Data["Content"] = "value"
 
 
 ### 模板名称
@@ -581,11 +643,11 @@ beego更加人性化的还有一个设计就是支持用户自定义字符串错
 
 ## response处理
 
-response可能会有集中情况：
+response可能会有几种情况：
 
 1. 模板输出
 
-	模板输出上面模板介绍里面已经介绍，beego会在执行完相应的Controller里面的对应的Method之后输出到模板。
+	上面模板介绍里面已经介绍，beego会在执行完相应的Controller里面的对应的Method之后输出到模板。
 
 2. 跳转
 
@@ -598,7 +660,7 @@ response可能会有集中情况：
 		this.Ctx.WriteString("ok")
 
 
-## Sessions
+## Sessions/Flash
 
 beego内置了session模块，目前session模块支持的后端引擎包括memory、file、mysql、redis四中，用户也可以根据相应的interface实现自己的引擎。
 
@@ -624,7 +686,7 @@ beego中使用session相当方便，只要在main入口函数中设置如下：
 		this.TplNames = "index.tpl"
 	}
 
-上面的例子中我们知道session有几个方便的方法：
+session有几个方便的方法：
 
 - SetSession(name string, value interface{})
 - GetSession(name string) interface{}
@@ -684,6 +746,64 @@ sess对象具有如下方法：
 	beego.SessionProvider = "redis"
 	beego.SessionSavePath = "127.0.0.1:6379"
 
+这个flash与Adobe/Macromedia Flash没有任何关系。它主要用于在两个逻辑间传递临时数据，flash中存放的所有数据会在紧接着的下一个逻辑中调用后清除。一般用于传递提示和错误消息。它适合[Post/Redirect/Get](http://en.wikipedia.org/wiki/Post/Redirect/Get)模式。下面看使用的例子
+
+	// 显示设置信息
+	func (c *MainController) Get() {
+		flash:=beego.ReadFromRequest(c)
+		if n,ok:=flash.Data["notice"];ok{
+			//显示设置成功
+			c.TplNames = "set_success.html"
+		}else if n,ok=flash.Data["error"];ok{
+			//显示错误
+			c.TplNames = "set_error.html"
+		}else{
+			// 不然默认显示设置页面
+			this.Data["list"]=GetInfo()
+			c.TplNames = "setting_list.html"
+		}
+	}
+	
+	// 处理设置信息
+	func (c *MainController) Post() {
+		flash:=beego.NewFlash()
+		setting:=Settings{}
+		valid := Validation{}
+		c.ParseForm(&setting)
+		if b, err := valid.Valid(setting);err!=nil {
+			flash.Error("Settings invalid!")
+			flash.Store(c)
+			c.Redirect("/setting",302)
+			return
+		}else if b!=nil{
+			flash.Error("validation err!")
+			flash.Store(c)
+			c.Redirect("/setting",302)
+			return
+		}	
+		saveSetting(setting)
+		flash.Notice("Settings saved!")
+		flash.Store(c)
+		c.Redirect("/setting",302)
+	}
+
+上面的代码执行的大概逻辑是这样的：
+
+1. Get方法执行，因为没有flash数据，所以显示设置页面
+2. 用户设置信息之后点击递交，执行Post，然后初始化一个flash，通过验证，验证出错或者验证不通过设置flash的错误，如果通过了就保存设置，然后设置flash成功设置的信息。
+3. 设置完成后跳转到Get请求
+4. Get请求获取到了Flash信息，然后执行相应的逻辑，如果出错显示出错的页面，如果成功显示成功的页面。
+
+默认情况下`ReadFromRequest`函数已经实现了读取的数据赋值给flash，所以在你的模板里面你可以这样读取数据
+
+	{{.flash.error}}
+	{{.flash.warning}}
+	{{.flash.notice}}
+	
+flash对象有三个级别的设置：
+* Notice提示信息
+* Warning警告信息
+* Error错误信息
 
 ## Cache设置
 

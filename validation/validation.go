@@ -2,6 +2,7 @@ package validation
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 )
 
@@ -83,16 +84,19 @@ func (v *Validation) Required(obj interface{}, key string) *ValidationResult {
 	return v.apply(Required{key}, obj)
 }
 
-func (v *Validation) Min(n int, min int, key string) *ValidationResult {
-	return v.apply(Min{min, key}, n)
+// Test that the obj is greater than min if obj's type is int
+func (v *Validation) Min(obj interface{}, min int, key string) *ValidationResult {
+	return v.apply(Min{min, key}, obj)
 }
 
-func (v *Validation) Max(n int, max int, key string) *ValidationResult {
-	return v.apply(Max{max, key}, n)
+// Test that the obj is less than max if obj's type is int
+func (v *Validation) Max(obj interface{}, max int, key string) *ValidationResult {
+	return v.apply(Max{max, key}, obj)
 }
 
-func (v *Validation) Range(n, min, max int, key string) *ValidationResult {
-	return v.apply(Range{Min{Min: min}, Max{Max: max}, key}, n)
+// Test that the obj is between mni and max if obj's type is int
+func (v *Validation) Range(obj interface{}, min, max int, key string) *ValidationResult {
+	return v.apply(Range{Min{Min: min}, Max{Max: max}, key}, obj)
 }
 
 func (v *Validation) MinSize(obj interface{}, min int, key string) *ValidationResult {
@@ -119,28 +123,45 @@ func (v *Validation) AlphaNumeric(obj interface{}, key string) *ValidationResult
 	return v.apply(AlphaNumeric{key}, obj)
 }
 
-func (v *Validation) Match(str string, regex *regexp.Regexp, key string) *ValidationResult {
-	return v.apply(Match{regex, key}, str)
+func (v *Validation) Match(obj interface{}, regex *regexp.Regexp, key string) *ValidationResult {
+	return v.apply(Match{regex, key}, obj)
 }
 
-func (v *Validation) NoMatch(str string, regex *regexp.Regexp, key string) *ValidationResult {
-	return v.apply(NoMatch{Match{Regexp: regex}, key}, str)
+func (v *Validation) NoMatch(obj interface{}, regex *regexp.Regexp, key string) *ValidationResult {
+	return v.apply(NoMatch{Match{Regexp: regex}, key}, obj)
 }
 
-func (v *Validation) AlphaDash(str string, key string) *ValidationResult {
-	return v.apply(AlphaDash{NoMatch{Match: Match{Regexp: alphaDashPattern}}, key}, str)
+func (v *Validation) AlphaDash(obj interface{}, key string) *ValidationResult {
+	return v.apply(AlphaDash{NoMatch{Match: Match{Regexp: alphaDashPattern}}, key}, obj)
 }
 
-func (v *Validation) Email(str string, key string) *ValidationResult {
-	return v.apply(Email{Match{Regexp: emailPattern}, key}, str)
+func (v *Validation) Email(obj interface{}, key string) *ValidationResult {
+	return v.apply(Email{Match{Regexp: emailPattern}, key}, obj)
 }
 
-func (v *Validation) IP(str string, key string) *ValidationResult {
-	return v.apply(IP{Match{Regexp: ipPattern}, key}, str)
+func (v *Validation) IP(obj interface{}, key string) *ValidationResult {
+	return v.apply(IP{Match{Regexp: ipPattern}, key}, obj)
 }
 
-func (v *Validation) Base64(str string, key string) *ValidationResult {
-	return v.apply(Base64{Match{Regexp: base64Pattern}, key}, str)
+func (v *Validation) Base64(obj interface{}, key string) *ValidationResult {
+	return v.apply(Base64{Match{Regexp: base64Pattern}, key}, obj)
+}
+
+func (v *Validation) Mobile(obj interface{}, key string) *ValidationResult {
+	return v.apply(Mobile{Match{Regexp: mobilePattern}, key}, obj)
+}
+
+func (v *Validation) Tel(obj interface{}, key string) *ValidationResult {
+	return v.apply(Tel{Match{Regexp: telPattern}, key}, obj)
+}
+
+func (v *Validation) Phone(obj interface{}, key string) *ValidationResult {
+	return v.apply(Phone{Mobile{Match: Match{Regexp: mobilePattern}},
+		Tel{Match: Match{Regexp: telPattern}}, key}, obj)
+}
+
+func (v *Validation) ZipCode(obj interface{}, key string) *ValidationResult {
+	return v.apply(ZipCode{Match{Regexp: zipCodePattern}, key}, obj)
 }
 
 func (v *Validation) apply(chk Validator, obj interface{}) *ValidationResult {
@@ -174,4 +195,33 @@ func (v *Validation) Check(obj interface{}, checks ...Validator) *ValidationResu
 		}
 	}
 	return result
+}
+
+// the obj parameter must be a struct or a struct pointer
+func (v *Validation) Valid(obj interface{}) (b bool, err error) {
+	objT := reflect.TypeOf(obj)
+	objV := reflect.ValueOf(obj)
+	switch {
+	case isStruct(objT):
+	case isStructPtr(objT):
+		objT = objT.Elem()
+		objV = objV.Elem()
+	default:
+		err = fmt.Errorf("%v must be a struct or a struct pointer", obj)
+		return
+	}
+
+	for i := 0; i < objT.NumField(); i++ {
+		var vfs []ValidFunc
+		if vfs, err = getValidFuncs(objT.Field(i)); err != nil {
+			return
+		}
+		for _, vf := range vfs {
+			if _, err = funcs.Call(vf.Name,
+				mergeParam(v, objV.Field(i).Interface(), vf.Params)...); err != nil {
+				return
+			}
+		}
+	}
+	return !v.HasErrors(), nil
 }

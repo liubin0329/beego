@@ -74,7 +74,7 @@ What happened in behind above example?
 
 Get into your $GOPATH, then use following command to setup Beego project:
 
-	bee create hello
+	bee new hello
 
 It generates folders and files for your project, directory structure as follows:
 
@@ -97,11 +97,11 @@ It generates folders and files for your project, directory structure as follows:
 
 Beego uses development mode as default, you can use following code to change mode in your application:
 
-	beego.RunMode = "pro"
+	beego.RunMode = "prod"
 
 Or use configuration file in `conf/app.conf`, and input following content:
 
-	runmode = pro
+	runmode = prod
 
 No differences between two ways.
 
@@ -338,7 +338,7 @@ To disable auto-render in `main.go`(before you call `beego.Run()` to run the app
 
 You can use `this.Data` in controller methods to access the data in templates. Suppose you want to get content of `{{.Content}}`, you can use following code to do this:
 
-	this.Data["Context"] = "value"
+	this.Data["Content"] = "value"
 
 
 ### Template name

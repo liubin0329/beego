@@ -31,7 +31,7 @@ func TestRequired(t *testing.T) {
 		t.Error("empty slice should be false")
 	}
 	if !valid.Required([]interface{}{"ok"}, "slice").Ok {
-		t.Error("slice should  be equal true")
+		t.Error("slice should be true")
 	}
 }
 
@@ -61,10 +61,10 @@ func TestRange(t *testing.T) {
 	valid := Validation{}
 
 	if valid.Range(-1, 0, 1, "range0_1").Ok {
-		t.Error("-1 is bettween 0 and 1 should be false")
+		t.Error("-1 is between 0 and 1 should be false")
 	}
 	if !valid.Range(1, 0, 1, "range0_1").Ok {
-		t.Error("1 is bettween 0 and 1 should be true")
+		t.Error("1 is between 0 and 1 should be true")
 	}
 }
 
@@ -215,5 +215,117 @@ func TestBase64(t *testing.T) {
 	}
 	if !valid.Base64("c3VjaHVhbmdqaUBnbWFpbC5jb20=", "base64").Ok {
 		t.Error("\"c3VjaHVhbmdqaUBnbWFpbC5jb20=\" are a valid base64 characters should be true")
+	}
+}
+
+func TestMobile(t *testing.T) {
+	valid := Validation{}
+
+	if valid.Mobile("19800008888", "mobile").Ok {
+		t.Error("\"19800008888\" is a valid mobile phone number should be false")
+	}
+	if !valid.Mobile("18800008888", "mobile").Ok {
+		t.Error("\"18800008888\" is a valid mobile phone number should be true")
+	}
+	if !valid.Mobile("18000008888", "mobile").Ok {
+		t.Error("\"18000008888\" is a valid mobile phone number should be true")
+	}
+	if !valid.Mobile("8618300008888", "mobile").Ok {
+		t.Error("\"8618300008888\" is a valid mobile phone number should be true")
+	}
+	if !valid.Mobile("+8614700008888", "mobile").Ok {
+		t.Error("\"+8614700008888\" is a valid mobile phone number should be true")
+	}
+}
+
+func TestTel(t *testing.T) {
+	valid := Validation{}
+
+	if valid.Tel("222-00008888", "telephone").Ok {
+		t.Error("\"222-00008888\" is a valid telephone number should be false")
+	}
+	if !valid.Tel("022-70008888", "telephone").Ok {
+		t.Error("\"022-70008888\" is a valid telephone number should be true")
+	}
+	if !valid.Tel("02270008888", "telephone").Ok {
+		t.Error("\"02270008888\" is a valid telephone number should be true")
+	}
+	if !valid.Tel("70008888", "telephone").Ok {
+		t.Error("\"70008888\" is a valid telephone number should be true")
+	}
+}
+
+func TestPhone(t *testing.T) {
+	valid := Validation{}
+
+	if valid.Phone("222-00008888", "phone").Ok {
+		t.Error("\"222-00008888\" is a valid phone number should be false")
+	}
+	if !valid.Mobile("+8614700008888", "phone").Ok {
+		t.Error("\"+8614700008888\" is a valid phone number should be true")
+	}
+	if !valid.Tel("02270008888", "phone").Ok {
+		t.Error("\"02270008888\" is a valid phone number should be true")
+	}
+}
+
+func TestZipCode(t *testing.T) {
+	valid := Validation{}
+
+	if valid.ZipCode("", "zipcode").Ok {
+		t.Error("\"00008888\" is a valid zipcode should be false")
+	}
+	if !valid.ZipCode("536000", "zipcode").Ok {
+		t.Error("\"536000\" is a valid zipcode should be true")
+	}
+}
+
+func TestValid(t *testing.T) {
+	type user struct {
+		Id   int
+		Name string `valid:"Required;Match(/^(test)?\\w*@(/test/);com$/)"`
+		Age  int    `valid:"Required;Range(1, 140)"`
+	}
+	valid := Validation{}
+
+	u := user{Name: "test@/test/;com", Age: 40}
+	b, err := valid.Valid(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b {
+		t.Error("validation should be passed")
+	}
+
+	uptr := &user{Name: "test", Age: 40}
+	valid.Clear()
+	b, err = valid.Valid(uptr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b {
+		t.Error("validation should not be passed")
+	}
+	if len(valid.Errors) != 1 {
+		t.Fatalf("valid errors len should be 1 but got %d", len(valid.Errors))
+	}
+	if valid.Errors[0].Key != "Name.Match" {
+		t.Errorf("Message key should be `Name.Match` but got %s", valid.Errors[0].Key)
+	}
+
+	u = user{Name: "test@/test/;com", Age: 180}
+	valid.Clear()
+	b, err = valid.Valid(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b {
+		t.Error("validation should not be passed")
+	}
+	if len(valid.Errors) != 1 {
+		t.Fatalf("valid errors len should be 1 but got %d", len(valid.Errors))
+	}
+	if valid.Errors[0].Key != "Age.Range" {
+		t.Errorf("Message key should be `Name.Match` but got %s", valid.Errors[0].Key)
 	}
 }

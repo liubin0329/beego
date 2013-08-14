@@ -2,9 +2,11 @@ package beego
 
 import (
 	"fmt"
-	"github.com/russross/blackfriday"
 	"html/template"
+	"net/url"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,14 +17,6 @@ func webTime(t time.Time) string {
 		ftime = ftime[0:len(ftime)-3] + "GMT"
 	}
 	return ftime
-}
-
-// MarkDown parses a string in MarkDown format and returns HTML. Used by the template parser as "markdown"
-func MarkDown(raw string) (output template.HTML) {
-	input := []byte(raw)
-	bOutput := blackfriday.MarkdownBasic(input)
-	output = template.HTML(string(bOutput))
-	return
 }
 
 func Substr(s string, start, length int) string {
@@ -169,4 +163,175 @@ func Htmlunquote(src string) string {
 	text = strings.Replace(text, "&amp;", "&", -1) // Must be done last!
 
 	return strings.TrimSpace(text)
+}
+
+func inSlice(v string, sl []string) bool {
+	for _, vv := range sl {
+		if vv == v {
+			return true
+		}
+	}
+	return false
+}
+
+// parse form values to struct via tag
+func ParseForm(form url.Values, obj interface{}) error {
+	objT := reflect.TypeOf(obj)
+	objV := reflect.ValueOf(obj)
+	if !isStructPtr(objT) {
+		return fmt.Errorf("%v must be  a struct pointer", obj)
+	}
+	objT = objT.Elem()
+	objV = objV.Elem()
+
+	for i := 0; i < objT.NumField(); i++ {
+		fieldV := objV.Field(i)
+		if !fieldV.CanSet() {
+			continue
+		}
+
+		fieldT := objT.Field(i)
+		tags := strings.Split(fieldT.Tag.Get("form"), ",")
+		var tag string
+		if len(tags) == 0 || len(tags[0]) == 0 {
+			tag = fieldT.Name
+		} else if tags[0] == "-" {
+			continue
+		} else {
+			tag = tags[0]
+		}
+
+		value := form.Get(tag)
+		if len(value) == 0 {
+			continue
+		}
+
+		switch fieldT.Type.Kind() {
+		case reflect.Bool:
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				return err
+			}
+			fieldV.SetBool(b)
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			x, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return err
+			}
+			fieldV.SetInt(x)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			x, err := strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				return err
+			}
+			fieldV.SetUint(x)
+		case reflect.Float32, reflect.Float64:
+			x, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return err
+			}
+			fieldV.SetFloat(x)
+		case reflect.Interface:
+			fieldV.Set(reflect.ValueOf(value))
+		case reflect.String:
+			fieldV.SetString(value)
+		}
+	}
+	return nil
+}
+
+// form types for RenderForm function
+var FormType = map[string]bool{
+	"text":     true,
+	"textarea": true,
+	"hidden":   true,
+	"password": true,
+}
+
+var unKind = map[reflect.Kind]bool{
+	reflect.Uintptr:       true,
+	reflect.Complex64:     true,
+	reflect.Complex128:    true,
+	reflect.Array:         true,
+	reflect.Chan:          true,
+	reflect.Func:          true,
+	reflect.Map:           true,
+	reflect.Ptr:           true,
+	reflect.Slice:         true,
+	reflect.Struct:        true,
+	reflect.UnsafePointer: true,
+}
+
+// obj must be a struct pointer
+func RenderForm(obj interface{}) template.HTML {
+	objT := reflect.TypeOf(obj)
+	objV := reflect.ValueOf(obj)
+	if !isStructPtr(objT) {
+		return template.HTML("")
+	}
+	objT = objT.Elem()
+	objV = objV.Elem()
+
+	var raw []string
+	for i := 0; i < objT.NumField(); i++ {
+		fieldV := objV.Field(i)
+		if !fieldV.CanSet() || unKind[fieldV.Kind()] {
+			continue
+		}
+
+		fieldT := objT.Field(i)
+		tags := strings.Split(fieldT.Tag.Get("form"), ",")
+		label := fieldT.Name + ": "
+		name := fieldT.Name
+		fType := "text"
+
+		switch len(tags) {
+		case 1:
+			if tags[0] == "-" {
+				continue
+			}
+			if len(tags[0]) > 0 {
+				name = tags[0]
+			}
+		case 2:
+			if len(tags[0]) > 0 {
+				name = tags[0]
+			}
+			if len(tags[1]) > 0 {
+				fType = tags[1]
+			}
+		case 3:
+			if len(tags[0]) > 0 {
+				name = tags[0]
+			}
+			if len(tags[1]) > 0 {
+				fType = tags[1]
+			}
+			if len(tags[2]) > 0 {
+				label = tags[2]
+			}
+		}
+
+		raw = append(raw, fmt.Sprintf(`%v<input name="%v" type="%v" value="%v">`,
+			label, name, fType, fieldV.Interface()))
+	}
+	return template.HTML(strings.Join(raw, "</br>"))
+}
+
+func isStructPtr(t reflect.Type) bool {
+	return t.Kind() == reflect.Ptr && t.Elem().Kind() == reflect.Struct
+}
+
+func stringsToJson(str string) string {
+	rs := []rune(str)
+	jsons := ""
+	for _, r := range rs {
+		rint := int(r)
+		if rint < 128 {
+			jsons += string(r)
+		} else {
+			jsons += "\\u" + strconv.FormatInt(int64(rint), 16) // json
+		}
+	}
+	return jsons
 }

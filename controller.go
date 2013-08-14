@@ -2,8 +2,8 @@ package beego
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
-	"compress/zlib"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
@@ -35,6 +35,7 @@ type Controller struct {
 	_xsrf_token string
 	gotofunc    string
 	CruSession  session.SessionStore
+	XSRFExpire  int
 }
 
 type ControllerInterface interface {
@@ -58,7 +59,6 @@ func (c *Controller) Init(ctx *Context, cn string) {
 	c.ChildName = cn
 	c.Ctx = ctx
 	c.TplExt = "tpl"
-
 }
 
 func (c *Controller) Prepare() {
@@ -110,39 +110,7 @@ func (c *Controller) Render() error {
 		return err
 	} else {
 		c.Ctx.ResponseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
-		output_writer := c.Ctx.ResponseWriter.(io.Writer)
-		if EnableGzip == true && c.Ctx.Request.Header.Get("Accept-Encoding") != "" {
-			splitted := strings.SplitN(c.Ctx.Request.Header.Get("Accept-Encoding"), ",", -1)
-			encodings := make([]string, len(splitted))
-
-			for i, val := range splitted {
-				encodings[i] = strings.TrimSpace(val)
-			}
-			for _, val := range encodings {
-				if val == "gzip" {
-					c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-					output_writer, _ = gzip.NewWriterLevel(c.Ctx.ResponseWriter, gzip.BestSpeed)
-
-					break
-				} else if val == "deflate" {
-					c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "deflate")
-					output_writer, _ = zlib.NewWriterLevel(c.Ctx.ResponseWriter, zlib.BestSpeed)
-					break
-				}
-			}
-		} else {
-			c.Ctx.SetHeader("Content-Length", strconv.Itoa(len(rb)), true)
-		}
-		output_writer.Write(rb)
-		switch output_writer.(type) {
-		case *gzip.Writer:
-			output_writer.(*gzip.Writer).Close()
-		case *zlib.Writer:
-			output_writer.(*zlib.Writer).Close()
-		case io.WriteCloser:
-			output_writer.(io.WriteCloser).Close()
-		}
-		return nil
+		c.writeToWriter(rb)
 	}
 	return nil
 }
@@ -156,7 +124,7 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 	//if the controller has set layout, then first get the tplname's content set the content to the layout
 	if c.Layout != "" {
 		if c.TplNames == "" {
-			c.TplNames = c.ChildName + "/" + c.Ctx.Request.Method + "." + c.TplExt
+			c.TplNames = c.ChildName + "/" + strings.ToLower(c.Ctx.Request.Method) + "." + c.TplExt
 		}
 		if RunMode == "dev" {
 			BuildTemplate(ViewsPath)
@@ -182,7 +150,7 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 		return icontent, nil
 	} else {
 		if c.TplNames == "" {
-			c.TplNames = c.ChildName + "/" + c.Ctx.Request.Method + "." + c.TplExt
+			c.TplNames = c.ChildName + "/" + strings.ToLower(c.Ctx.Request.Method) + "." + c.TplExt
 		}
 		if RunMode == "dev" {
 			BuildTemplate(ViewsPath)
@@ -204,6 +172,41 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 	return []byte{}, nil
 }
 
+func (c *Controller) writeToWriter(rb []byte) {
+	output_writer := c.Ctx.ResponseWriter.(io.Writer)
+	if EnableGzip == true && c.Ctx.Request.Header.Get("Accept-Encoding") != "" {
+		splitted := strings.SplitN(c.Ctx.Request.Header.Get("Accept-Encoding"), ",", -1)
+		encodings := make([]string, len(splitted))
+
+		for i, val := range splitted {
+			encodings[i] = strings.TrimSpace(val)
+		}
+		for _, val := range encodings {
+			if val == "gzip" {
+				c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+				output_writer, _ = gzip.NewWriterLevel(c.Ctx.ResponseWriter, gzip.BestSpeed)
+
+				break
+			} else if val == "deflate" {
+				c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "deflate")
+				output_writer, _ = flate.NewWriter(c.Ctx.ResponseWriter, flate.BestSpeed)
+				break
+			}
+		}
+	} else {
+		c.Ctx.SetHeader("Content-Length", strconv.Itoa(len(rb)), true)
+	}
+	output_writer.Write(rb)
+	switch output_writer.(type) {
+	case *gzip.Writer:
+		output_writer.(*gzip.Writer).Close()
+	case *flate.Writer:
+		output_writer.(*flate.Writer).Close()
+	case io.WriteCloser:
+		output_writer.(io.WriteCloser).Close()
+	}
+}
+
 func (c *Controller) Redirect(url string, code int) {
 	c.Ctx.Redirect(code, url)
 }
@@ -212,15 +215,17 @@ func (c *Controller) Abort(code string) {
 	panic(code)
 }
 
-func (c *Controller) ServeJson() {
+func (c *Controller) ServeJson(encoding ...bool) {
 	content, err := json.MarshalIndent(c.Data["json"], "", "  ")
 	if err != nil {
 		http.Error(c.Ctx.ResponseWriter, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	c.Ctx.SetHeader("Content-Length", strconv.Itoa(len(content)), true)
 	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/json;charset=UTF-8")
-	c.Ctx.ResponseWriter.Write(content)
+	if len(encoding) > 0 && encoding[0] == true {
+		content = []byte(stringsToJson(string(content)))
+	}
+	c.writeToWriter(content)
 }
 
 func (c *Controller) ServeJsonp() {
@@ -238,9 +243,8 @@ func (c *Controller) ServeJsonp() {
 	callback_content.WriteString("(")
 	callback_content.Write(content)
 	callback_content.WriteString(");\r\n")
-	c.Ctx.SetHeader("Content-Length", strconv.Itoa(callback_content.Len()), true)
 	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/json;charset=UTF-8")
-	c.Ctx.ResponseWriter.Write(callback_content.Bytes())
+	c.writeToWriter(callback_content.Bytes())
 }
 
 func (c *Controller) ServeXml() {
@@ -249,9 +253,8 @@ func (c *Controller) ServeXml() {
 		http.Error(c.Ctx.ResponseWriter, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	c.Ctx.SetHeader("Content-Length", strconv.Itoa(len(content)), true)
 	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/xml;charset=UTF-8")
-	c.Ctx.ResponseWriter.Write(content)
+	c.writeToWriter(content)
 }
 
 func (c *Controller) Input() url.Values {
@@ -262,6 +265,10 @@ func (c *Controller) Input() url.Values {
 		c.Ctx.Request.ParseForm()
 	}
 	return c.Ctx.Request.Form
+}
+
+func (c *Controller) ParseForm(obj interface{}) error {
+	return ParseForm(c.Input(), obj)
 }
 
 func (c *Controller) GetString(key string) string {
@@ -335,6 +342,10 @@ func (c *Controller) DelSession(name interface{}) {
 	c.CruSession.Delete(name)
 }
 
+func (c *Controller) DestroySession() {
+	GlobalSessions.SessionDestroy(c.Ctx.ResponseWriter, c.Ctx.Request)
+}
+
 func (c *Controller) IsAjax() bool {
 	return (c.Ctx.Request.Header.Get("HTTP_X_REQUESTED_WITH") == "XMLHttpRequest")
 }
@@ -346,8 +357,14 @@ func (c *Controller) XsrfToken() string {
 			h := hmac.New(sha1.New, []byte(XSRFKEY))
 			fmt.Fprintf(h, "%s:%d", c.Ctx.Request.RemoteAddr, time.Now().UnixNano())
 			tok := fmt.Sprintf("%s:%d", h.Sum(nil), time.Now().UnixNano())
-			token := base64.URLEncoding.EncodeToString([]byte(tok))
-			c.Ctx.SetCookie("_xsrf", token)
+			token = base64.URLEncoding.EncodeToString([]byte(tok))
+			expire := 0
+			if c.XSRFExpire > 0 {
+				expire = c.XSRFExpire
+			} else {
+				expire = XSRFExpire
+			}
+			c.Ctx.SetCookie("_xsrf", token, expire)
 		}
 		c._xsrf_token = token
 	}
@@ -356,7 +373,6 @@ func (c *Controller) XsrfToken() string {
 
 func (c *Controller) CheckXsrfCookie() bool {
 	token := c.GetString("_xsrf")
-
 	if token == "" {
 		token = c.Ctx.Request.Header.Get("X-Xsrftoken")
 	}
