@@ -178,7 +178,7 @@ func ParseConfig() (err error) {
 			DirectoryIndex = directoryindex
 		}
 		if hotupdate, err := AppConfig.Bool("hotupdate"); err == nil {
-			EnbaleHotUpdate = hotupdate
+			EnableHotUpdate = hotupdate
 		}
 		if timeout, err := AppConfig.Int64("httpservertimeout"); err == nil {
 			HttpServerTimeOut = timeout
@@ -191,6 +191,12 @@ func ParseConfig() (err error) {
 		}
 		if xsrfkey := AppConfig.String("xsrfkey"); xsrfkey != "" {
 			XSRFKEY = xsrfkey
+		}
+		if enablexsrf, err := AppConfig.Bool("enablexsrf"); err == nil {
+			EnableXSRF = enablexsrf
+		}
+		if expire, err := AppConfig.Int("xsrfexpire"); err == nil {
+			XSRFExpire = expire
 		}
 	}
 	return nil
