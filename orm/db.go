@@ -304,7 +304,11 @@ func (d *dbBase) Delete(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.
 
 		if num > 0 {
 			if mi.fields.pk.auto {
-				ind.Field(mi.fields.pk.fieldIndex).SetInt(0)
+				if mi.fields.pk.fieldType&IsPostiveIntegerField > 0 {
+					ind.Field(mi.fields.pk.fieldIndex).SetUint(0)
+				} else {
+					ind.Field(mi.fields.pk.fieldIndex).SetInt(0)
+				}
 			}
 
 			err := d.deleteRels(q, mi, []interface{}{pkValue}, tz)
@@ -805,7 +809,7 @@ setValue:
 				_, err = str.Int32()
 			case TypeBigIntegerField:
 				_, err = str.Int64()
-			case TypePostiveBitField:
+			case TypePositiveBitField:
 				_, err = str.Uint8()
 			case TypePositiveSmallIntegerField:
 				_, err = str.Uint16()
@@ -1111,4 +1115,66 @@ func (d *dbBase) TimeFromDB(t *time.Time, tz *time.Location) {
 
 func (d *dbBase) TimeToDB(t *time.Time, tz *time.Location) {
 	*t = t.In(tz)
+}
+
+func (d *dbBase) DbTypes() map[string]string {
+	return nil
+}
+
+func (d *dbBase) GetTables(db dbQuerier) (map[string]bool, error) {
+	tables := make(map[string]bool)
+	query := d.ins.ShowTablesQuery()
+	rows, err := db.Query(query)
+	if err != nil {
+		return tables, err
+	}
+
+	for rows.Next() {
+		var table string
+		err := rows.Scan(&table)
+		if err != nil {
+			return tables, err
+		}
+		if table != "" {
+			tables[table] = true
+		}
+	}
+
+	return tables, nil
+}
+
+func (d *dbBase) GetColumns(db dbQuerier, table string) (map[string][3]string, error) {
+	columns := make(map[string][3]string)
+	query := d.ins.ShowColumnsQuery(table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return columns, err
+	}
+
+	for rows.Next() {
+		var (
+			name string
+			typ  string
+			null string
+		)
+		err := rows.Scan(&name, &typ, &null)
+		if err != nil {
+			return columns, err
+		}
+		columns[name] = [3]string{name, typ, null}
+	}
+
+	return columns, nil
+}
+
+func (d *dbBase) ShowTablesQuery() string {
+	panic(ErrNotImplement)
+}
+
+func (d *dbBase) ShowColumnsQuery(table string) string {
+	panic(ErrNotImplement)
+}
+
+func (d *dbBase) IndexExists(dbQuerier, string, string) bool {
+	panic(ErrNotImplement)
 }

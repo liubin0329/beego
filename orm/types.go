@@ -45,8 +45,8 @@ type QuerySeter interface {
 	Filter(string, ...interface{}) QuerySeter
 	Exclude(string, ...interface{}) QuerySeter
 	SetCond(*Condition) QuerySeter
-	Limit(int, ...int64) QuerySeter
-	Offset(int64) QuerySeter
+	Limit(int, ...interface{}) QuerySeter
+	Offset(interface{}) QuerySeter
 	OrderBy(...string) QuerySeter
 	RelatedSel(...interface{}) QuerySeter
 	Count() (int64, error)
@@ -132,4 +132,10 @@ type dbBaser interface {
 	HasReturningID(*modelInfo, *string) bool
 	TimeFromDB(*time.Time, *time.Location)
 	TimeToDB(*time.Time, *time.Location)
+	DbTypes() map[string]string
+	GetTables(dbQuerier) (map[string]bool, error)
+	GetColumns(dbQuerier, string) (map[string][3]string, error)
+	ShowTablesQuery() string
+	ShowColumnsQuery(string) string
+	IndexExists(dbQuerier, string, string) bool
 }

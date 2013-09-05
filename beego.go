@@ -48,6 +48,8 @@ var (
 	EnableXSRF           bool
 	XSRFExpire           int
 	CopyRequestBody      bool //When in raw application, You want to the reqeustbody
+	TemplateLeft         string
+	TemplateRight        string
 )
 
 func init() {
@@ -78,6 +80,8 @@ func init() {
 	ErrorsShow = true
 	XSRFKEY = "beegoxsrf"
 	XSRFExpire = 60
+	TemplateLeft = "{{"
+	TemplateRight = "}}"
 	ParseConfig()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 }
@@ -94,13 +98,21 @@ func NewApp() *App {
 }
 
 func (app *App) Run() {
-	addr := fmt.Sprintf("%s:%d", HttpAddr, HttpPort)
+	addr := HttpAddr
+
+	if HttpPort != 0 {
+		addr = fmt.Sprintf("%s:%d", HttpAddr, HttpPort)
+	}
 	var (
 		err error
 		l   net.Listener
 	)
 	if UseFcgi {
-		l, err = net.Listen("tcp", addr)
+		if HttpPort == 0 {
+			l, err = net.Listen("unix", addr)
+		} else {
+			l, err = net.Listen("tcp", addr)
+		}
 		if err != nil {
 			BeeLogger.Fatal("Listen: ", err)
 		}
@@ -130,7 +142,6 @@ func (app *App) Run() {
 			}
 			err = s.ListenAndServe()
 		}
-
 	}
 	if err != nil {
 		BeeLogger.Fatal("ListenAndServe: ", err)

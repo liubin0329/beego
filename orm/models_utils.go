@@ -26,6 +26,38 @@ func getTableName(val reflect.Value) string {
 	return snakeString(ind.Type().Name())
 }
 
+func getTableIndex(val reflect.Value) [][]string {
+	fun := val.MethodByName("TableIndex")
+	if fun.IsValid() {
+		vals := fun.Call([]reflect.Value{})
+		if len(vals) > 0 {
+			val := vals[0]
+			if val.CanInterface() {
+				if d, ok := val.Interface().([][]string); ok {
+					return d
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func getTableUnique(val reflect.Value) [][]string {
+	fun := val.MethodByName("TableUnique")
+	if fun.IsValid() {
+		vals := fun.Call([]reflect.Value{})
+		if len(vals) > 0 {
+			val := vals[0]
+			if val.CanInterface() {
+				if d, ok := val.Interface().([][]string); ok {
+					return d
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func getColumnName(ft int, addrField reflect.Value, sf reflect.StructField, col string) string {
 	column := strings.ToLower(col)
 	if column == "" {
@@ -52,7 +84,7 @@ func getFieldType(val reflect.Value) (ft int, err error) {
 	case reflect.Int64:
 		ft = TypeBigIntegerField
 	case reflect.Uint8:
-		ft = TypePostiveBitField
+		ft = TypePositiveBitField
 	case reflect.Uint16:
 		ft = TypePositiveSmallIntegerField
 	case reflect.Uint32, reflect.Uint:
@@ -64,7 +96,7 @@ func getFieldType(val reflect.Value) (ft int, err error) {
 	case reflect.Bool:
 		ft = TypeBooleanField
 	case reflect.String:
-		ft = TypeTextField
+		ft = TypeCharField
 	case reflect.Invalid:
 	default:
 		if elm.CanInterface() {

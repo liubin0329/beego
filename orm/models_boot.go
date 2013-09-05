@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func registerModel(model interface{}) {
+func registerModel(model interface{}, prefix string) {
 	val := reflect.ValueOf(model)
 	ind := reflect.Indirect(val)
 	typ := ind.Type()
@@ -17,29 +17,53 @@ func registerModel(model interface{}) {
 		panic(fmt.Sprintf("<orm.RegisterModel> cannot use non-ptr model struct `%s`", getFullName(typ)))
 	}
 
-	info := newModelInfo(val)
+	table := getTableName(val)
+
+	if prefix != "" {
+		table = prefix + table
+	}
 
 	name := getFullName(typ)
 	if _, ok := modelCache.getByFN(name); ok {
-		fmt.Printf("<orm.RegisterModel> model `%s` redeclared, must be unique\n", name)
+		fmt.Printf("<orm.RegisterModel> model `%s` repeat register, must be unique\n", name)
 		os.Exit(2)
 	}
 
-	table := getTableName(val)
 	if _, ok := modelCache.get(table); ok {
-		fmt.Printf("<orm.RegisterModel> table name `%s` redeclared, must be unique\n", table)
+		fmt.Printf("<orm.RegisterModel> table name `%s` repeat register, must be unique\n", table)
 		os.Exit(2)
 	}
+
+	info := newModelInfo(val)
 
 	if info.fields.pk == nil {
-		fmt.Printf("<orm.RegisterModel> `%s` need a primary key field\n", name)
-		os.Exit(2)
+	outFor:
+		for _, fi := range info.fields.fieldsDB {
+			if fi.name == "Id" {
+				if fi.sf.Tag.Get(defaultStructTagName) == "" {
+					switch fi.addrValue.Elem().Kind() {
+					case reflect.Int, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64:
+						fi.auto = true
+						fi.pk = true
+						info.fields.pk = fi
+						break outFor
+					}
+				}
+			}
+		}
+
+		if info.fields.pk == nil {
+			fmt.Printf("<orm.RegisterModel> `%s` need a primary key field\n", name)
+			os.Exit(2)
+		}
+
 	}
 
 	info.table = table
 	info.pkg = typ.PkgPath()
 	info.model = model
 	info.manual = true
+
 	modelCache.set(table, info)
 }
 
@@ -54,7 +78,7 @@ func bootStrap() {
 	)
 
 	if dataBaseCache.getDefault() == nil {
-		err = fmt.Errorf("must have one register alias named `default`")
+		err = fmt.Errorf("must have one register DataBase alias named `default`")
 		goto end
 	}
 
@@ -79,7 +103,7 @@ func bootStrap() {
 				switch fi.fieldType {
 				case RelManyToMany:
 					if fi.relThrough != "" {
-						msg := fmt.Sprintf("filed `%s` wrong rel_through value `%s`", fi.fullName, fi.relThrough)
+						msg := fmt.Sprintf("field `%s` wrong rel_through value `%s`", fi.fullName, fi.relThrough)
 						if i := strings.LastIndex(fi.relThrough, "."); i != -1 && len(fi.relThrough) > (i+1) {
 							pn := fi.relThrough[:i]
 							mn := fi.relThrough[i+1:]
@@ -220,11 +244,22 @@ end:
 
 func RegisterModel(models ...interface{}) {
 	if modelCache.done {
-		panic(fmt.Errorf("RegisterModel must be run begore BootStrap"))
+		panic(fmt.Errorf("RegisterModel must be run before BootStrap"))
 	}
 
 	for _, model := range models {
-		registerModel(model)
+		registerModel(model, "")
+	}
+}
+
+// register model with a prefix
+func RegisterModelWithPrefix(prefix string, models ...interface{}) {
+	if modelCache.done {
+		panic(fmt.Errorf("RegisterModel must be run before BootStrap"))
+	}
+
+	for _, model := range models {
+		registerModel(model, prefix)
 	}
 }
 
