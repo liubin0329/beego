@@ -33,6 +33,7 @@ more features please read the docs
 
 ## Changelog
 
+* 2013-08-19: support table auto create
 * 2013-08-13: update test for database types
 * 2013-08-13: go type support, such as int8, uint8, byte, rune
 * 2013-08-13: date / datetime timezone support very well
@@ -153,8 +154,8 @@ note: not recommend use this in product env.
 
 more details and examples in docs and test
 
-* [中文](docs/zh)
-* English
+* [中文](http://beego.me/docs/Models_Overview?lang=zh)
+* [English](http://beego.me/docs/Models_Overview?lang=en)
 
 ## TODO
 - some unrealized api

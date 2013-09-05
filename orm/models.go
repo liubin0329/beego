@@ -20,7 +20,6 @@ var (
 	supportTag = map[string]int{
 		"-":            1,
 		"null":         1,
-		"blank":        1,
 		"index":        1,
 		"unique":       1,
 		"pk":           1,
@@ -59,8 +58,8 @@ func (mc *_modelCache) all() map[string]*modelInfo {
 
 func (mc *_modelCache) allOrdered() []*modelInfo {
 	m := make([]*modelInfo, 0, len(mc.orders))
-	for _, v := range mc.cache {
-		m = append(m, v)
+	for _, table := range mc.orders {
+		m = append(m, mc.cache[table])
 	}
 	return m
 }
@@ -83,4 +82,11 @@ func (mc *_modelCache) set(table string, mi *modelInfo) *modelInfo {
 		mc.orders = append(mc.orders, table)
 	}
 	return mii
+}
+
+func (mc *_modelCache) clean() {
+	mc.orders = make([]string, 0)
+	mc.cache = make(map[string]*modelInfo)
+	mc.cacheByFN = make(map[string]*modelInfo)
+	mc.done = false
 }

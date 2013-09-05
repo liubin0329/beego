@@ -20,6 +20,26 @@ var postgresOperators = map[string]string{
 	"iendswith":   "LIKE UPPER(?)",
 }
 
+var postgresTypes = map[string]string{
+	"auto":            "serial NOT NULL PRIMARY KEY",
+	"pk":              "NOT NULL PRIMARY KEY",
+	"bool":            "bool",
+	"string":          "varchar(%d)",
+	"string-text":     "text",
+	"time.Time-date":  "date",
+	"time.Time":       "timestamp with time zone",
+	"int8":            `smallint CHECK("%COL%" >= -127 AND "%COL%" <= 128)`,
+	"int16":           "smallint",
+	"int32":           "integer",
+	"int64":           "bigint",
+	"uint8":           `smallint CHECK("%COL%" >= 0 AND "%COL%" <= 255)`,
+	"uint16":          `integer CHECK("%COL%" >= 0)`,
+	"uint32":          `bigint CHECK("%COL%" >= 0)`,
+	"uint64":          `bigint CHECK("%COL%" >= 0)`,
+	"float64":         "double precision",
+	"float64-decimal": "numeric(%d, %d)",
+}
+
 type dbBasePostgres struct {
 	dbBase
 }
@@ -85,6 +105,26 @@ func (d *dbBasePostgres) HasReturningID(mi *modelInfo, query *string) (has bool)
 		has = true
 	}
 	return
+}
+
+func (d *dbBasePostgres) ShowTablesQuery() string {
+	return "SELECT table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')"
+}
+
+func (d *dbBasePostgres) ShowColumnsQuery(table string) string {
+	return fmt.Sprintf("SELECT column_name, data_type, is_nullable FROM information_schema.columns where table_schema NOT IN ('pg_catalog', 'information_schema') and table_name = '%s'", table)
+}
+
+func (d *dbBasePostgres) DbTypes() map[string]string {
+	return postgresTypes
+}
+
+func (d *dbBasePostgres) IndexExists(db dbQuerier, table string, name string) bool {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pg_indexes WHERE tablename = '%s' AND indexname = '%s'", table, name)
+	row := db.QueryRow(query)
+	var cnt int
+	row.Scan(&cnt)
+	return cnt > 0
 }
 
 func newdbBasePostgres() dbBaser {
