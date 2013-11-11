@@ -1,12 +1,17 @@
-package beego
+package middleware
 
 import (
 	"fmt"
 	"html/template"
 	"net/http"
 	"runtime"
+	"strconv"
 )
 
+var (
+	AppName string
+	VERSION string
+)
 var tpl = `
 <!DOCTYPE html> 
 <html> 
@@ -257,7 +262,11 @@ func InternalServerError(rw http.ResponseWriter, r *http.Request) {
 	t.Execute(rw, data)
 }
 
-func registerErrorHander() {
+func Errorhandler(err string, h http.HandlerFunc) {
+	ErrorMaps[err] = h
+}
+
+func RegisterErrorHander() {
 	if _, ok := ErrorMaps["404"]; !ok {
 		ErrorMaps["404"] = NotFound
 	}
@@ -276,5 +285,24 @@ func registerErrorHander() {
 
 	if _, ok := ErrorMaps["500"]; !ok {
 		ErrorMaps["500"] = InternalServerError
+	}
+}
+
+func Exception(errcode string, w http.ResponseWriter, r *http.Request, msg string) {
+	if h, ok := ErrorMaps[errcode]; ok {
+		h(w, r)
+		return
+	} else {
+		isint, err := strconv.Atoi(errcode)
+		if err != nil {
+			isint = 500
+		}
+		if isint == 400 {
+			msg = "404 page not found"
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(isint)
+		fmt.Fprintln(w, msg)
+		return
 	}
 }

@@ -26,6 +26,20 @@ func getTableName(val reflect.Value) string {
 	return snakeString(ind.Type().Name())
 }
 
+func getTableEngine(val reflect.Value) string {
+	fun := val.MethodByName("TableEngine")
+	if fun.IsValid() {
+		vals := fun.Call([]reflect.Value{})
+		if len(vals) > 0 {
+			val := vals[0]
+			if val.Kind() == reflect.String {
+				return val.String()
+			}
+		}
+	}
+	return ""
+}
+
 func getTableIndex(val reflect.Value) [][]string {
 	fun := val.MethodByName("TableIndex")
 	if fun.IsValid() {
@@ -59,13 +73,16 @@ func getTableUnique(val reflect.Value) [][]string {
 }
 
 func getColumnName(ft int, addrField reflect.Value, sf reflect.StructField, col string) string {
-	column := strings.ToLower(col)
-	if column == "" {
+	col = strings.ToLower(col)
+	column := col
+	if col == "" {
 		column = snakeString(sf.Name)
 	}
 	switch ft {
 	case RelForeignKey, RelOneToOne:
-		column = column + "_id"
+		if len(col) == 0 {
+			column = column + "_id"
+		}
 	case RelManyToMany, RelReverseMany, RelReverseOne:
 		column = sf.Name
 	}
@@ -114,7 +131,7 @@ func getFieldType(val reflect.Value) (ft int, err error) {
 func parseStructTag(data string, attrs *map[string]bool, tags *map[string]string) {
 	attr := make(map[string]bool)
 	tag := make(map[string]string)
-	for _, v := range strings.Split(data, ";") {
+	for _, v := range strings.Split(data, defaultStructTagDelim) {
 		v = strings.TrimSpace(v)
 		if supportTag[v] == 1 {
 			attr[v] = true

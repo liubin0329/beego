@@ -2,6 +2,7 @@ package orm
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,11 @@ func (f StrTo) Float64() (float64, error) {
 	return strconv.ParseFloat(f.String(), 64)
 }
 
+func (f StrTo) Int() (int, error) {
+	v, err := strconv.ParseInt(f.String(), 10, 32)
+	return int(v), err
+}
+
 func (f StrTo) Int8() (int8, error) {
 	v, err := strconv.ParseInt(f.String(), 10, 8)
 	return int8(v), err
@@ -56,6 +62,11 @@ func (f StrTo) Int32() (int32, error) {
 func (f StrTo) Int64() (int64, error) {
 	v, err := strconv.ParseInt(f.String(), 10, 64)
 	return int64(v), err
+}
+
+func (f StrTo) Uint() (uint, error) {
+	v, err := strconv.ParseUint(f.String(), 10, 32)
+	return uint(v), err
 }
 
 func (f StrTo) Uint8() (uint8, error) {
@@ -115,10 +126,25 @@ func ToStr(value interface{}, args ...int) (s string) {
 		s = strconv.FormatUint(v, argInt(args).Get(0, 10))
 	case string:
 		s = v
+	case []byte:
+		s = string(v)
 	default:
 		s = fmt.Sprintf("%v", v)
 	}
 	return s
+}
+
+func ToInt64(value interface{}) (d int64) {
+	val := reflect.ValueOf(value)
+	switch value.(type) {
+	case int, int8, int16, int32, int64:
+		d = val.Int()
+	case uint, uint8, uint16, uint32, uint64:
+		d = int64(val.Uint())
+	default:
+		panic(fmt.Errorf("ToInt64 need numeric not `%T`", value))
+	}
+	return
 }
 
 func snakeString(s string) string {

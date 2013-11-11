@@ -16,17 +16,15 @@ type Fielder interface {
 	FieldType() int
 	SetRaw(interface{}) error
 	RawValue() interface{}
-	Clean() error
 }
 
 type Ormer interface {
-	Read(interface{}) error
+	Read(interface{}, ...string) error
 	Insert(interface{}) (int64, error)
-	Update(interface{}) (int64, error)
+	Update(interface{}, ...string) (int64, error)
 	Delete(interface{}) (int64, error)
-	M2mAdd(interface{}, string, ...interface{}) (int64, error)
-	M2mDel(interface{}, string, ...interface{}) (int64, error)
-	LoadRel(interface{}, string) (int64, error)
+	LoadRelated(interface{}, string, ...interface{}) (int64, error)
+	QueryM2M(interface{}, string) QueryM2Mer
 	QueryTable(interface{}) QuerySeter
 	Using(string) error
 	Begin() error
@@ -45,19 +43,28 @@ type QuerySeter interface {
 	Filter(string, ...interface{}) QuerySeter
 	Exclude(string, ...interface{}) QuerySeter
 	SetCond(*Condition) QuerySeter
-	Limit(int, ...interface{}) QuerySeter
+	Limit(interface{}, ...interface{}) QuerySeter
 	Offset(interface{}) QuerySeter
 	OrderBy(...string) QuerySeter
 	RelatedSel(...interface{}) QuerySeter
 	Count() (int64, error)
+	Exist() bool
 	Update(Params) (int64, error)
 	Delete() (int64, error)
 	PrepareInsert() (Inserter, error)
-	All(interface{}) (int64, error)
-	One(interface{}) error
+	All(interface{}, ...string) (int64, error)
+	One(interface{}, ...string) error
 	Values(*[]Params, ...string) (int64, error)
 	ValuesList(*[]ParamsList, ...string) (int64, error)
 	ValuesFlat(*ParamsList, string) (int64, error)
+}
+
+type QueryM2Mer interface {
+	Add(...interface{}) (int64, error)
+	Remove(...interface{}) (int64, error)
+	Exist(interface{}) bool
+	Clear() (int64, error)
+	Count() (int64, error)
 }
 
 type RawPreparer interface {
@@ -74,17 +81,6 @@ type RawSeter interface {
 	ValuesList(*[]ParamsList) (int64, error)
 	ValuesFlat(*ParamsList) (int64, error)
 	Prepare() (RawPreparer, error)
-}
-
-type IFieldError interface {
-	Name() string
-	Error() error
-}
-
-type IFieldErrors interface {
-	Get(string) IFieldError
-	Set(string, IFieldError)
-	List() []IFieldError
 }
 
 type stmtQuerier interface {
@@ -111,12 +107,13 @@ type txEnder interface {
 }
 
 type dbBaser interface {
-	Read(dbQuerier, *modelInfo, reflect.Value, *time.Location) error
+	Read(dbQuerier, *modelInfo, reflect.Value, *time.Location, []string) error
 	Insert(dbQuerier, *modelInfo, reflect.Value, *time.Location) (int64, error)
+	InsertValue(dbQuerier, *modelInfo, []string, []interface{}) (int64, error)
 	InsertStmt(stmtQuerier, *modelInfo, reflect.Value, *time.Location) (int64, error)
-	Update(dbQuerier, *modelInfo, reflect.Value, *time.Location) (int64, error)
+	Update(dbQuerier, *modelInfo, reflect.Value, *time.Location, []string) (int64, error)
 	Delete(dbQuerier, *modelInfo, reflect.Value, *time.Location) (int64, error)
-	ReadBatch(dbQuerier, *querySet, *modelInfo, *Condition, interface{}, *time.Location) (int64, error)
+	ReadBatch(dbQuerier, *querySet, *modelInfo, *Condition, interface{}, *time.Location, []string) (int64, error)
 	SupportUpdateJoin() bool
 	UpdateBatch(dbQuerier, *querySet, *modelInfo, *Condition, Params, *time.Location) (int64, error)
 	DeleteBatch(dbQuerier, *querySet, *modelInfo, *Condition, *time.Location) (int64, error)
@@ -138,4 +135,5 @@ type dbBaser interface {
 	ShowTablesQuery() string
 	ShowColumnsQuery(string) string
 	IndexExists(dbQuerier, string, string) bool
+	collectFieldValue(*modelInfo, *fieldInfo, reflect.Value, bool, *time.Location) (interface{}, error)
 }

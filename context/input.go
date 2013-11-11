@@ -40,7 +40,13 @@ func (input *BeegoInput) Site() string {
 }
 
 func (input *BeegoInput) Scheme() string {
-	return input.req.URL.Scheme
+	if input.req.URL.Scheme != "" {
+		return input.req.URL.Scheme
+	} else if input.req.TLS == nil {
+		return "http"
+	} else {
+		return "https"
+	}
 }
 
 func (input *BeegoInput) Domain() string {
@@ -67,11 +73,15 @@ func (input *BeegoInput) Is(method string) bool {
 }
 
 func (input *BeegoInput) IsAjax() bool {
-	return input.Header("HTTP_X_REQUESTED_WITH") == "XMLHttpRequest"
+	return input.Header("X-Requested-With") == "XMLHttpRequest"
 }
 
 func (input *BeegoInput) IsSecure() bool {
 	return input.Scheme() == "https"
+}
+
+func (input *BeegoInput) IsWebsocket() bool {
+	return input.Header("Upgrade") == "websocket"
 }
 
 func (input *BeegoInput) IsUpload() bool {
@@ -151,5 +161,6 @@ func (input *BeegoInput) Body() []byte {
 	input.req.Body.Close()
 	bf := bytes.NewBuffer(requestbody)
 	input.req.Body = ioutil.NopCloser(bf)
+	input.RequestBody = requestbody
 	return requestbody
 }

@@ -2,15 +2,44 @@ package orm
 
 import (
 	"fmt"
-	"reflect"
 )
+
+type colValue struct {
+	value int64
+	opt   operator
+}
+
+type operator int
+
+const (
+	Col_Add operator = iota
+	Col_Minus
+	Col_Multiply
+	Col_Except
+)
+
+func ColValue(opt operator, value interface{}) interface{} {
+	switch opt {
+	case Col_Add, Col_Minus, Col_Multiply, Col_Except:
+	default:
+		panic(fmt.Errorf("orm.ColValue wrong operator"))
+	}
+	v, err := StrTo(ToStr(value)).Int64()
+	if err != nil {
+		panic(fmt.Errorf("orm.ColValue doesn't support non string/numeric type, %s", err))
+	}
+	var val colValue
+	val.value = v
+	val.opt = opt
+	return val
+}
 
 type querySet struct {
 	mi       *modelInfo
 	cond     *Condition
 	related  []string
 	relDepth int
-	limit    int
+	limit    int64
 	offset   int64
 	orders   []string
 	orm      *orm
@@ -35,19 +64,11 @@ func (o querySet) Exclude(expr string, args ...interface{}) QuerySeter {
 }
 
 func (o *querySet) setOffset(num interface{}) {
-	val := reflect.ValueOf(num)
-	switch num.(type) {
-	case int, int8, int16, int32, int64:
-		o.offset = val.Int()
-	case uint, uint8, uint16, uint32, uint64:
-		o.offset = int64(val.Uint())
-	default:
-		panic(fmt.Errorf("<QuerySeter> offset value need numeric not `%T`", num))
-	}
+	o.offset = ToInt64(num)
 }
 
-func (o querySet) Limit(limit int, args ...interface{}) QuerySeter {
-	o.limit = limit
+func (o querySet) Limit(limit interface{}, args ...interface{}) QuerySeter {
+	o.limit = ToInt64(limit)
 	if len(args) > 0 {
 		o.setOffset(args[0])
 	}
@@ -76,7 +97,7 @@ func (o querySet) RelatedSel(params ...interface{}) QuerySeter {
 			case int:
 				o.relDepth = val
 			default:
-				panic(fmt.Sprintf("<QuerySeter.RelatedSel> wrong param kind: %v", val))
+				panic(fmt.Errorf("<QuerySeter.RelatedSel> wrong param kind: %v", val))
 			}
 		}
 	}
@@ -93,6 +114,11 @@ func (o *querySet) Count() (int64, error) {
 	return o.orm.alias.DbBaser.Count(o.orm.db, o, o.mi, o.cond, o.orm.alias.TZ)
 }
 
+func (o *querySet) Exist() bool {
+	cnt, _ := o.orm.alias.DbBaser.Count(o.orm.db, o, o.mi, o.cond, o.orm.alias.TZ)
+	return cnt > 0
+}
+
 func (o *querySet) Update(values Params) (int64, error) {
 	return o.orm.alias.DbBaser.UpdateBatch(o.orm.db, o, o.mi, o.cond, values, o.orm.alias.TZ)
 }
@@ -105,12 +131,12 @@ func (o *querySet) PrepareInsert() (Inserter, error) {
 	return newInsertSet(o.orm, o.mi)
 }
 
-func (o *querySet) All(container interface{}) (int64, error) {
-	return o.orm.alias.DbBaser.ReadBatch(o.orm.db, o, o.mi, o.cond, container, o.orm.alias.TZ)
+func (o *querySet) All(container interface{}, cols ...string) (int64, error) {
+	return o.orm.alias.DbBaser.ReadBatch(o.orm.db, o, o.mi, o.cond, container, o.orm.alias.TZ, cols)
 }
 
-func (o *querySet) One(container interface{}) error {
-	num, err := o.orm.alias.DbBaser.ReadBatch(o.orm.db, o, o.mi, o.cond, container, o.orm.alias.TZ)
+func (o *querySet) One(container interface{}, cols ...string) error {
+	num, err := o.orm.alias.DbBaser.ReadBatch(o.orm.db, o, o.mi, o.cond, container, o.orm.alias.TZ, cols)
 	if err != nil {
 		return err
 	}

@@ -1,9 +1,11 @@
 package beego
 
 import (
+	"crypto/rand"
 	"fmt"
 	"html/template"
 	"net/url"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -66,43 +68,58 @@ func DateFormat(t time.Time, layout string) (datestring string) {
 	return
 }
 
-// Date takes a PHP like date func to Go's time fomate
-func Date(t time.Time, format string) (datestring string) {
-	patterns := []string{
-		// year
-		"Y", "2006", // A full numeric representation of a year, 4 digits	Examples: 1999 or 2003
-		"y", "06", //A two digit representation of a year	Examples: 99 or 03
+var DatePatterns = []string{
+	// year
+	"Y", "2006", // A full numeric representation of a year, 4 digits   Examples: 1999 or 2003
+	"y", "06", //A two digit representation of a year   Examples: 99 or 03
 
-		// month
-		"m", "01", // Numeric representation of a month, with leading zeros	01 through 12
-		"n", "1", // Numeric representation of a month, without leading zeros	1 through 12
-		"M", "Jan", // A short textual representation of a month, three letters	Jan through Dec
-		"F", "January", // A full textual representation of a month, such as January or March	January through December
+	// month
+	"m", "01", // Numeric representation of a month, with leading zeros 01 through 12
+	"n", "1", // Numeric representation of a month, without leading zeros   1 through 12
+	"M", "Jan", // A short textual representation of a month, three letters Jan through Dec
+	"F", "January", // A full textual representation of a month, such as January or March   January through December
 
-		// day
-		"d", "02", // Day of the month, 2 digits with leading zeros	01 to 31
-		"j", "2", // Day of the month without leading zeros	1 to 31
+	// day
+	"d", "02", // Day of the month, 2 digits with leading zeros 01 to 31
+	"j", "2", // Day of the month without leading zeros 1 to 31
 
-		// week
-		"D", "Mon", // A textual representation of a day, three letters	Mon through Sun
-		"l", "Monday", // A full textual representation of the day of the week	Sunday through Saturday
+	// week
+	"D", "Mon", // A textual representation of a day, three letters Mon through Sun
+	"l", "Monday", // A full textual representation of the day of the week  Sunday through Saturday
 
-		// time
-		"g", "3", // 12-hour format of an hour without leading zeros	1 through 12
-		"G", "15", // 24-hour format of an hour without leading zeros	0 through 23
-		"h", "03", // 12-hour format of an hour with leading zeros	01 through 12
-		"H", "15", // 24-hour format of an hour with leading zeros	00 through 23
+	// time
+	"g", "3", // 12-hour format of an hour without leading zeros    1 through 12
+	"G", "15", // 24-hour format of an hour without leading zeros   0 through 23
+	"h", "03", // 12-hour format of an hour with leading zeros  01 through 12
+	"H", "15", // 24-hour format of an hour with leading zeros  00 through 23
 
-		"a", "pm", // Lowercase Ante meridiem and Post meridiem	am or pm
-		"A", "PM", // Uppercase Ante meridiem and Post meridiem	AM or PM
+	"a", "pm", // Lowercase Ante meridiem and Post meridiem am or pm
+	"A", "PM", // Uppercase Ante meridiem and Post meridiem AM or PM
 
-		"i", "04", // Minutes with leading zeros	00 to 59
-		"s", "05", // Seconds, with leading zeros	00 through 59
-	}
-	replacer := strings.NewReplacer(patterns...)
+	"i", "04", // Minutes with leading zeros    00 to 59
+	"s", "05", // Seconds, with leading zeros   00 through 59
+
+	// time zone
+	"T", "MST",
+	"P", "-07:00",
+	"O", "-0700",
+
+	// RFC 2822
+	"r", time.RFC1123Z,
+}
+
+// Parse Date use PHP time format
+func DateParse(dateString, format string) (time.Time, error) {
+	replacer := strings.NewReplacer(DatePatterns...)
 	format = replacer.Replace(format)
-	datestring = t.Format(format)
-	return
+	return time.ParseInLocation(format, dateString, time.Local)
+}
+
+// Date takes a PHP like date func to Go's time format
+func Date(t time.Time, format string) string {
+	replacer := strings.NewReplacer(DatePatterns...)
+	format = replacer.Replace(format)
+	return t.Format(format)
 }
 
 // Compare is a quick and dirty comparison function. It will convert whatever you give it to strings and see if the two values are equal.
@@ -334,4 +351,40 @@ func stringsToJson(str string) string {
 		}
 	}
 	return jsons
+}
+
+func FileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func GetRandomString(n int) string {
+	const alphanum = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	var bytes = make([]byte, n)
+	rand.Read(bytes)
+	for i, b := range bytes {
+		bytes[i] = alphanum[b%byte(len(alphanum))]
+	}
+	return string(bytes)
+}
+
+// This will reference the index function local to the current blueprint:
+//	UrlFor(".index")
+//	...  print UrlFor("index")
+//	...  print UrlFor("login")
+//	...  print UrlFor("login", "next","/"")
+//	...  print UrlFor("profile", "username","John Doe")
+//	...
+//	/
+//	/login
+//	/login?next=/
+//	/user/John%20Doe
+func UrlFor(endpoint string, values ...string) string {
+	return BeeApp.UrlFor(endpoint, values...)
 }

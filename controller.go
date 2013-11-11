@@ -2,15 +2,12 @@ package beego
 
 import (
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
-	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/astaxie/beego/context"
 	"github.com/astaxie/beego/session"
 	"html/template"
 	"io"
@@ -19,27 +16,28 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type Controller struct {
-	Ctx         *Context
-	Data        map[interface{}]interface{}
-	ChildName   string
-	TplNames    string
-	Layout      string
-	TplExt      string
-	_xsrf_token string
-	gotofunc    string
-	CruSession  session.SessionStore
-	XSRFExpire  int
+	Ctx           *context.Context
+	Data          map[interface{}]interface{}
+	ChildName     string
+	TplNames      string
+	Layout        string
+	TplExt        string
+	_xsrf_token   string
+	gotofunc      string
+	CruSession    session.SessionStore
+	XSRFExpire    int
+	AppController interface{}
 }
 
 type ControllerInterface interface {
-	Init(ct *Context, cn string)
+	Init(ct *context.Context, childName string, app interface{})
 	Prepare()
 	Get()
 	Post()
@@ -52,13 +50,14 @@ type ControllerInterface interface {
 	Render() error
 }
 
-func (c *Controller) Init(ctx *Context, cn string) {
+func (c *Controller) Init(ctx *context.Context, childName string, app interface{}) {
 	c.Data = make(map[interface{}]interface{})
 	c.Layout = ""
 	c.TplNames = ""
-	c.ChildName = cn
+	c.ChildName = childName
 	c.Ctx = ctx
 	c.TplExt = "tpl"
+	c.AppController = app
 }
 
 func (c *Controller) Prepare() {
@@ -109,8 +108,8 @@ func (c *Controller) Render() error {
 	if err != nil {
 		return err
 	} else {
-		c.Ctx.ResponseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
-		c.writeToWriter(rb)
+		c.Ctx.Output.Header("Content-Type", "text/html; charset=utf-8")
+		c.Ctx.Output.Body(rb)
 	}
 	return nil
 }
@@ -129,20 +128,19 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 		if RunMode == "dev" {
 			BuildTemplate(ViewsPath)
 		}
-		subdir := path.Dir(c.TplNames)
-		_, file := path.Split(c.TplNames)
 		newbytes := bytes.NewBufferString("")
-		if _, ok := BeeTemplates[subdir]; !ok {
+		if _, ok := BeeTemplates[c.TplNames]; !ok {
 			panic("can't find templatefile in the path:" + c.TplNames)
 			return []byte{}, errors.New("can't find templatefile in the path:" + c.TplNames)
 		}
-		BeeTemplates[subdir].ExecuteTemplate(newbytes, file, c.Data)
+		err := BeeTemplates[c.TplNames].ExecuteTemplate(newbytes, c.TplNames, c.Data)
+		if err != nil {
+			Trace("template Execute err:", err)
+		}
 		tplcontent, _ := ioutil.ReadAll(newbytes)
 		c.Data["LayoutContent"] = template.HTML(string(tplcontent))
-		subdir = path.Dir(c.Layout)
-		_, file = path.Split(c.Layout)
 		ibytes := bytes.NewBufferString("")
-		err := BeeTemplates[subdir].ExecuteTemplate(ibytes, file, c.Data)
+		err = BeeTemplates[c.Layout].ExecuteTemplate(ibytes, c.Layout, c.Data)
 		if err != nil {
 			Trace("template Execute err:", err)
 		}
@@ -155,14 +153,12 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 		if RunMode == "dev" {
 			BuildTemplate(ViewsPath)
 		}
-		subdir := path.Dir(c.TplNames)
-		_, file := path.Split(c.TplNames)
 		ibytes := bytes.NewBufferString("")
-		if _, ok := BeeTemplates[subdir]; !ok {
+		if _, ok := BeeTemplates[c.TplNames]; !ok {
 			panic("can't find templatefile in the path:" + c.TplNames)
 			return []byte{}, errors.New("can't find templatefile in the path:" + c.TplNames)
 		}
-		err := BeeTemplates[subdir].ExecuteTemplate(ibytes, file, c.Data)
+		err := BeeTemplates[c.TplNames].ExecuteTemplate(ibytes, c.TplNames, c.Data)
 		if err != nil {
 			Trace("template Execute err:", err)
 		}
@@ -170,41 +166,6 @@ func (c *Controller) RenderBytes() ([]byte, error) {
 		return icontent, nil
 	}
 	return []byte{}, nil
-}
-
-func (c *Controller) writeToWriter(rb []byte) {
-	output_writer := c.Ctx.ResponseWriter.(io.Writer)
-	if EnableGzip == true && c.Ctx.Request.Header.Get("Accept-Encoding") != "" {
-		splitted := strings.SplitN(c.Ctx.Request.Header.Get("Accept-Encoding"), ",", -1)
-		encodings := make([]string, len(splitted))
-
-		for i, val := range splitted {
-			encodings[i] = strings.TrimSpace(val)
-		}
-		for _, val := range encodings {
-			if val == "gzip" {
-				c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-				output_writer, _ = gzip.NewWriterLevel(c.Ctx.ResponseWriter, gzip.BestSpeed)
-
-				break
-			} else if val == "deflate" {
-				c.Ctx.ResponseWriter.Header().Set("Content-Encoding", "deflate")
-				output_writer, _ = flate.NewWriter(c.Ctx.ResponseWriter, flate.BestSpeed)
-				break
-			}
-		}
-	} else {
-		c.Ctx.SetHeader("Content-Length", strconv.Itoa(len(rb)), true)
-	}
-	output_writer.Write(rb)
-	switch output_writer.(type) {
-	case *gzip.Writer:
-		output_writer.(*gzip.Writer).Close()
-	case *flate.Writer:
-		output_writer.(*flate.Writer).Close()
-	case io.WriteCloser:
-		output_writer.(io.WriteCloser).Close()
-	}
 }
 
 func (c *Controller) Redirect(url string, code int) {
@@ -215,64 +176,49 @@ func (c *Controller) Abort(code string) {
 	panic(code)
 }
 
-func (c *Controller) ServeJson(encoding ...bool) {
-	var content []byte
-	var err error
-	if RunMode == "prod" {
-		content, err = json.Marshal(c.Data["json"])
+func (c *Controller) UrlFor(endpoint string, values ...string) string {
+	if len(endpoint) <= 0 {
+		return ""
+	}
+	if endpoint[0] == '.' {
+		return UrlFor(reflect.Indirect(reflect.ValueOf(c.AppController)).Type().Name()+endpoint, values...)
 	} else {
-		content, err = json.MarshalIndent(c.Data["json"], "", "  ")
+		return UrlFor(endpoint, values...)
 	}
-	if err != nil {
-		http.Error(c.Ctx.ResponseWriter, err.Error(), http.StatusInternalServerError)
-		return
+}
+
+func (c *Controller) ServeJson(encoding ...bool) {
+	var hasIndent bool
+	var hasencoding bool
+	if RunMode == "prod" {
+		hasIndent = false
+	} else {
+		hasIndent = true
 	}
-	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/json;charset=UTF-8")
 	if len(encoding) > 0 && encoding[0] == true {
-		content = []byte(stringsToJson(string(content)))
+		hasencoding = true
 	}
-	c.writeToWriter(content)
+	c.Ctx.Output.Json(c.Data["json"], hasIndent, hasencoding)
 }
 
 func (c *Controller) ServeJsonp() {
-	var content []byte
-	var err error
+	var hasIndent bool
 	if RunMode == "prod" {
-		content, err = json.Marshal(c.Data["jsonp"])
+		hasIndent = false
 	} else {
-		content, err = json.MarshalIndent(c.Data["jsonp"], "", "  ")
+		hasIndent = true
 	}
-	if err != nil {
-		http.Error(c.Ctx.ResponseWriter, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	callback := c.Ctx.Request.Form.Get("callback")
-	if callback == "" {
-		http.Error(c.Ctx.ResponseWriter, `"callback" parameter required`, http.StatusInternalServerError)
-		return
-	}
-	callback_content := bytes.NewBufferString(callback)
-	callback_content.WriteString("(")
-	callback_content.Write(content)
-	callback_content.WriteString(");\r\n")
-	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/javascript;charset=UTF-8")
-	c.writeToWriter(callback_content.Bytes())
+	c.Ctx.Output.Jsonp(c.Data["jsonp"], hasIndent)
 }
 
 func (c *Controller) ServeXml() {
-	var content []byte
-	var err error
+	var hasIndent bool
 	if RunMode == "prod" {
-		content, err = xml.Marshal(c.Data["xml"])
+		hasIndent = false
 	} else {
-		content, err = xml.MarshalIndent(c.Data["xml"], "", "  ")
+		hasIndent = true
 	}
-	if err != nil {
-		http.Error(c.Ctx.ResponseWriter, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/xml;charset=UTF-8")
-	c.writeToWriter(content)
+	c.Ctx.Output.Xml(c.Data["xml"], hasIndent)
 }
 
 func (c *Controller) Input() url.Values {
@@ -313,6 +259,10 @@ func (c *Controller) GetBool(key string) (bool, error) {
 	return strconv.ParseBool(c.Input().Get(key))
 }
 
+func (c *Controller) GetFloat(key string) (float64, error) {
+	return strconv.ParseFloat(c.Input().Get(key), 64)
+}
+
 func (c *Controller) GetFile(key string) (multipart.File, *multipart.FileHeader, error) {
 	return c.Ctx.Request.FormFile(key)
 }
@@ -334,7 +284,7 @@ func (c *Controller) SaveToFile(fromfile, tofile string) error {
 
 func (c *Controller) StartSession() session.SessionStore {
 	if c.CruSession == nil {
-		c.CruSession = GlobalSessions.SessionStart(c.Ctx.ResponseWriter, c.Ctx.Request)
+		c.CruSession = c.Ctx.Input.CruSession
 	}
 	return c.CruSession
 }
@@ -360,29 +310,67 @@ func (c *Controller) DelSession(name interface{}) {
 	c.CruSession.Delete(name)
 }
 
+func (c *Controller) SessionRegenerateID() {
+	c.CruSession = GlobalSessions.SessionRegenerateId(c.Ctx.ResponseWriter, c.Ctx.Request)
+	c.Ctx.Input.CruSession = c.CruSession
+}
+
 func (c *Controller) DestroySession() {
 	GlobalSessions.SessionDestroy(c.Ctx.ResponseWriter, c.Ctx.Request)
 }
 
 func (c *Controller) IsAjax() bool {
-	return (c.Ctx.Request.Header.Get("HTTP_X_REQUESTED_WITH") == "XMLHttpRequest")
+	return c.Ctx.Input.IsAjax()
+}
+
+func (c *Controller) GetSecureCookie(Secret, key string) (string, bool) {
+	val := c.Ctx.GetCookie(key)
+	if val == "" {
+		return "", false
+	}
+
+	parts := strings.SplitN(val, "|", 3)
+
+	if len(parts) != 3 {
+		return "", false
+	}
+
+	vs := parts[0]
+	timestamp := parts[1]
+	sig := parts[2]
+
+	h := hmac.New(sha1.New, []byte(Secret))
+	fmt.Fprintf(h, "%s%s", vs, timestamp)
+
+	if fmt.Sprintf("%02x", h.Sum(nil)) != sig {
+		return "", false
+	}
+	res, _ := base64.URLEncoding.DecodeString(vs)
+	return string(res), true
+}
+
+func (c *Controller) SetSecureCookie(Secret, name, val string, age int64) {
+	vs := base64.URLEncoding.EncodeToString([]byte(val))
+	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	h := hmac.New(sha1.New, []byte(Secret))
+	fmt.Fprintf(h, "%s%s", vs, timestamp)
+	sig := fmt.Sprintf("%02x", h.Sum(nil))
+	cookie := strings.Join([]string{vs, timestamp, sig}, "|")
+	c.Ctx.SetCookie(name, cookie, age, "/")
 }
 
 func (c *Controller) XsrfToken() string {
 	if c._xsrf_token == "" {
-		token := c.Ctx.GetCookie("_xsrf")
-		if token == "" {
-			h := hmac.New(sha1.New, []byte(XSRFKEY))
-			fmt.Fprintf(h, "%s:%d", c.Ctx.Request.RemoteAddr, time.Now().UnixNano())
-			tok := fmt.Sprintf("%s:%d", h.Sum(nil), time.Now().UnixNano())
-			token = base64.URLEncoding.EncodeToString([]byte(tok))
-			expire := 0
+		token, ok := c.GetSecureCookie(XSRFKEY, "_xsrf")
+		if !ok {
+			var expire int64
 			if c.XSRFExpire > 0 {
-				expire = c.XSRFExpire
+				expire = int64(c.XSRFExpire)
 			} else {
-				expire = XSRFExpire
+				expire = int64(XSRFExpire)
 			}
-			c.Ctx.SetCookie("_xsrf", token, expire)
+			token = GetRandomString(15)
+			c.SetSecureCookie(XSRFKEY, "_xsrf", token, expire)
 		}
 		c._xsrf_token = token
 	}
@@ -399,9 +387,7 @@ func (c *Controller) CheckXsrfCookie() bool {
 	}
 	if token == "" {
 		c.Ctx.Abort(403, "'_xsrf' argument missing from POST")
-	}
-
-	if c._xsrf_token != token {
+	} else if c._xsrf_token != token {
 		c.Ctx.Abort(403, "XSRF cookie does not match POST argument")
 	}
 	return true

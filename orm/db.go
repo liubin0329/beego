@@ -49,89 +49,95 @@ type dbBase struct {
 	ins dbBaser
 }
 
-func (d *dbBase) collectValues(mi *modelInfo, ind reflect.Value, skipAuto bool, insert bool, tz *time.Location) (columns []string, values []interface{}, err error) {
-	_, pkValue, _ := getExistPk(mi, ind)
-	for _, column := range mi.fields.orders {
-		fi := mi.fields.columns[column]
+var _ dbBaser = new(dbBase)
+
+func (d *dbBase) collectValues(mi *modelInfo, ind reflect.Value, cols []string, skipAuto bool, insert bool, tz *time.Location) (columns []string, values []interface{}, err error) {
+	for _, column := range cols {
+		var fi *fieldInfo
+		if fi, _ = mi.fields.GetByAny(column); fi != nil {
+			column = fi.column
+		} else {
+			panic(fmt.Errorf("wrong db field/column name `%s` for model `%s`", column, mi.fullName))
+		}
 		if fi.dbcol == false || fi.auto && skipAuto {
 			continue
 		}
-		var value interface{}
-		if fi.pk {
-			value = pkValue
-		} else {
-			field := ind.Field(fi.fieldIndex)
-			if fi.isFielder {
-				f := field.Addr().Interface().(Fielder)
-				value = f.RawValue()
-			} else {
-				switch fi.fieldType {
-				case TypeBooleanField:
-					value = field.Bool()
-				case TypeCharField, TypeTextField:
-					value = field.String()
-				case TypeFloatField, TypeDecimalField:
-					vu := field.Interface()
-					if _, ok := vu.(float32); ok {
-						value, _ = StrTo(ToStr(vu)).Float64()
-					} else {
-						value = field.Float()
-					}
-				case TypeDateField, TypeDateTimeField:
-					value = field.Interface()
-					if t, ok := value.(time.Time); ok {
-						if fi.fieldType == TypeDateField {
-							d.ins.TimeToDB(&t, DefaultTimeLoc)
-						} else {
-							d.ins.TimeToDB(&t, tz)
-						}
-						value = t
-					}
-				default:
-					switch {
-					case fi.fieldType&IsPostiveIntegerField > 0:
-						value = field.Uint()
-					case fi.fieldType&IsIntegerField > 0:
-						value = field.Int()
-					case fi.fieldType&IsRelField > 0:
-						if field.IsNil() {
-							value = nil
-						} else {
-							if _, vu, ok := getExistPk(fi.relModelInfo, reflect.Indirect(field)); ok {
-								value = vu
-							} else {
-								value = nil
-							}
-						}
-						if fi.null == false && value == nil {
-							return nil, nil, errors.New(fmt.Sprintf("field `%s` cannot be NULL", fi.fullName))
-						}
-					}
-				}
-			}
-			switch fi.fieldType {
-			case TypeDateField, TypeDateTimeField:
-				if fi.auto_now || fi.auto_now_add && insert {
-					tnow := time.Now()
-					if fi.fieldType == TypeDateField {
-						d.ins.TimeToDB(&tnow, DefaultTimeLoc)
-					} else {
-						d.ins.TimeToDB(&tnow, tz)
-					}
-					value = tnow
-					if fi.isFielder {
-						f := field.Addr().Interface().(Fielder)
-						f.SetRaw(tnow.In(DefaultTimeLoc))
-					} else {
-						field.Set(reflect.ValueOf(tnow.In(DefaultTimeLoc)))
-					}
-				}
-			}
+		value, err := d.collectFieldValue(mi, fi, ind, insert, tz)
+		if err != nil {
+			return nil, nil, err
 		}
 		columns = append(columns, column)
 		values = append(values, value)
 	}
 	return
+}
+
+func (d *dbBase) collectFieldValue(mi *modelInfo, fi *fieldInfo, ind reflect.Value, insert bool, tz *time.Location) (interface{}, error) {
+	var value interface{}
+	if fi.pk {
+		_, value, _ = getExistPk(mi, ind)
+	} else {
+		field := ind.Field(fi.fieldIndex)
+		if fi.isFielder {
+			f := field.Addr().Interface().(Fielder)
+			value = f.RawValue()
+		} else {
+			switch fi.fieldType {
+			case TypeBooleanField:
+				value = field.Bool()
+			case TypeCharField, TypeTextField:
+				value = field.String()
+			case TypeFloatField, TypeDecimalField:
+				vu := field.Interface()
+				if _, ok := vu.(float32); ok {
+					value, _ = StrTo(ToStr(vu)).Float64()
+				} else {
+					value = field.Float()
+				}
+			case TypeDateField, TypeDateTimeField:
+				value = field.Interface()
+				if t, ok := value.(time.Time); ok {
+					d.ins.TimeToDB(&t, tz)
+					value = t
+				}
+			default:
+				switch {
+				case fi.fieldType&IsPostiveIntegerField > 0:
+					value = field.Uint()
+				case fi.fieldType&IsIntegerField > 0:
+					value = field.Int()
+				case fi.fieldType&IsRelField > 0:
+					if field.IsNil() {
+						value = nil
+					} else {
+						if _, vu, ok := getExistPk(fi.relModelInfo, reflect.Indirect(field)); ok {
+							value = vu
+						} else {
+							value = nil
+						}
+					}
+					if fi.null == false && value == nil {
+						return nil, errors.New(fmt.Sprintf("field `%s` cannot be NULL", fi.fullName))
+					}
+				}
+			}
+		}
+		switch fi.fieldType {
+		case TypeDateField, TypeDateTimeField:
+			if fi.auto_now || fi.auto_now_add && insert {
+				tnow := time.Now()
+				d.ins.TimeToDB(&tnow, tz)
+				value = tnow
+				if fi.isFielder {
+					f := field.Addr().Interface().(Fielder)
+					f.SetRaw(tnow.In(DefaultTimeLoc))
+				} else {
+					field.Set(reflect.ValueOf(tnow.In(DefaultTimeLoc)))
+				}
+			}
+		}
+	}
+	return value, nil
 }
 
 func (d *dbBase) PrepareInsert(q dbQuerier, mi *modelInfo) (stmtQuerier, string, error) {
@@ -160,7 +166,7 @@ func (d *dbBase) PrepareInsert(q dbQuerier, mi *modelInfo) (stmtQuerier, string,
 }
 
 func (d *dbBase) InsertStmt(stmt stmtQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location) (int64, error) {
-	_, values, err := d.collectValues(mi, ind, true, true, tz)
+	_, values, err := d.collectValues(mi, ind, mi.fields.dbcols, true, true, tz)
 	if err != nil {
 		return 0, err
 	}
@@ -179,10 +185,25 @@ func (d *dbBase) InsertStmt(stmt stmtQuerier, mi *modelInfo, ind reflect.Value, 
 	}
 }
 
-func (d *dbBase) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location) error {
-	pkColumn, pkValue, ok := getExistPk(mi, ind)
-	if ok == false {
-		return ErrMissPK
+func (d *dbBase) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) error {
+	var whereCols []string
+	var args []interface{}
+
+	// if specify cols length > 0, then use it for where condition.
+	if len(cols) > 0 {
+		var err error
+		whereCols, args, err = d.collectValues(mi, ind, cols, false, false, tz)
+		if err != nil {
+			return err
+		}
+	} else {
+		// default use pk value as where condtion.
+		pkColumn, pkValue, ok := getExistPk(mi, ind)
+		if ok == false {
+			return ErrMissPK
+		}
+		whereCols = append(whereCols, pkColumn)
+		args = append(args, pkValue)
 	}
 
 	Q := d.ins.TableQuote()
@@ -191,7 +212,10 @@ func (d *dbBase) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Lo
 	sels := strings.Join(mi.fields.dbcols, sep)
 	colsNum := len(mi.fields.dbcols)
 
-	query := fmt.Sprintf("SELECT %s%s%s FROM %s%s%s WHERE %s%s%s = ?", Q, sels, Q, Q, mi.table, Q, Q, pkColumn, Q)
+	sep = fmt.Sprintf("%s = ? AND %s", Q, Q)
+	wheres := strings.Join(whereCols, sep)
+
+	query := fmt.Sprintf("SELECT %s%s%s FROM %s%s%s WHERE %s%s%s = ?", Q, sels, Q, Q, mi.table, Q, Q, wheres, Q)
 
 	refs := make([]interface{}, colsNum)
 	for i, _ := range refs {
@@ -201,7 +225,7 @@ func (d *dbBase) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Lo
 
 	d.ins.ReplaceMarks(&query)
 
-	row := q.QueryRow(query, pkValue)
+	row := q.QueryRow(query, args...)
 	if err := row.Scan(refs...); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrNoRows
@@ -220,11 +244,15 @@ func (d *dbBase) Read(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Lo
 }
 
 func (d *dbBase) Insert(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location) (int64, error) {
-	names, values, err := d.collectValues(mi, ind, true, true, tz)
+	names, values, err := d.collectValues(mi, ind, mi.fields.dbcols, true, true, tz)
 	if err != nil {
 		return 0, err
 	}
 
+	return d.InsertValue(q, mi, names, values)
+}
+
+func (d *dbBase) InsertValue(q dbQuerier, mi *modelInfo, names []string, values []interface{}) (int64, error) {
 	Q := d.ins.TableQuote()
 
 	marks := make([]string, len(names))
@@ -254,12 +282,18 @@ func (d *dbBase) Insert(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.
 	}
 }
 
-func (d *dbBase) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location) (int64, error) {
+func (d *dbBase) Update(q dbQuerier, mi *modelInfo, ind reflect.Value, tz *time.Location, cols []string) (int64, error) {
 	pkName, pkValue, ok := getExistPk(mi, ind)
 	if ok == false {
 		return 0, ErrMissPK
 	}
-	setNames, setValues, err := d.collectValues(mi, ind, true, false, tz)
+
+	// if specify cols length is zero, then commit all columns.
+	if len(cols) == 0 {
+		cols = mi.fields.dbcols
+	}
+
+	setNames, setValues, err := d.collectValues(mi, ind, cols, true, false, tz)
 	if err != nil {
 		return 0, err
 	}
@@ -329,7 +363,7 @@ func (d *dbBase) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Con
 	values := make([]interface{}, 0, len(params))
 	for col, val := range params {
 		if fi, ok := mi.fields.GetByAny(col); ok == false || fi.dbcol == false {
-			panic(fmt.Sprintf("wrong field/column name `%s`", col))
+			panic(fmt.Errorf("wrong field/column name `%s`", col))
 		} else {
 			columns = append(columns, fi.column)
 			values = append(values, val)
@@ -337,7 +371,7 @@ func (d *dbBase) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Con
 	}
 
 	if len(columns) == 0 {
-		panic("update params cannot empty")
+		panic(fmt.Errorf("update params cannot empty"))
 	}
 
 	tables := newDbTables(mi, d.ins)
@@ -351,17 +385,42 @@ func (d *dbBase) UpdateBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Con
 
 	join := tables.getJoinSql()
 
-	var query string
+	var query, T string
 
 	Q := d.ins.TableQuote()
 
 	if d.ins.SupportUpdateJoin() {
-		cols := strings.Join(columns, fmt.Sprintf("%s = ?, T0.%s", Q, Q))
-		query = fmt.Sprintf("UPDATE %s%s%s T0 %sSET T0.%s%s%s = ? %s", Q, mi.table, Q, join, Q, cols, Q, where)
+		T = "T0."
+	}
+
+	cols := make([]string, 0, len(columns))
+
+	for i, v := range columns {
+		col := fmt.Sprintf("%s%s%s%s", T, Q, v, Q)
+		if c, ok := values[i].(colValue); ok {
+			switch c.opt {
+			case Col_Add:
+				cols = append(cols, col+" = "+col+" + ?")
+			case Col_Minus:
+				cols = append(cols, col+" = "+col+" - ?")
+			case Col_Multiply:
+				cols = append(cols, col+" = "+col+" * ?")
+			case Col_Except:
+				cols = append(cols, col+" = "+col+" / ?")
+			}
+			values[i] = c.value
+		} else {
+			cols = append(cols, col+" = ?")
+		}
+	}
+
+	sets := strings.Join(cols, ", ") + " "
+
+	if d.ins.SupportUpdateJoin() {
+		query = fmt.Sprintf("UPDATE %s%s%s T0 %sSET %s%s", Q, mi.table, Q, join, sets, where)
 	} else {
-		cols := strings.Join(columns, fmt.Sprintf("%s = ?, %s", Q, Q))
 		supQuery := fmt.Sprintf("SELECT T0.%s%s%s FROM %s%s%s T0 %s%s", Q, mi.fields.pk.column, Q, Q, mi.table, Q, join, where)
-		query = fmt.Sprintf("UPDATE %s%s%s SET %s%s%s = ? WHERE %s%s%s IN ( %s )", Q, mi.table, Q, Q, cols, Q, Q, mi.fields.pk.column, Q, supQuery)
+		query = fmt.Sprintf("UPDATE %s%s%s SET %sWHERE %s%s%s IN ( %s )", Q, mi.table, Q, sets, Q, mi.fields.pk.column, Q, supQuery)
 	}
 
 	d.ins.ReplaceMarks(&query)
@@ -407,7 +466,7 @@ func (d *dbBase) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Con
 	}
 
 	if cond == nil || cond.IsEmpty() {
-		panic("delete operation cannot execute without condition")
+		panic(fmt.Errorf("delete operation cannot execute without condition"))
 	}
 
 	Q := d.ins.TableQuote()
@@ -473,21 +532,25 @@ func (d *dbBase) DeleteBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Con
 	return 0, nil
 }
 
-func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location) (int64, error) {
+func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condition, container interface{}, tz *time.Location, cols []string) (int64, error) {
 
 	val := reflect.ValueOf(container)
 	ind := reflect.Indirect(val)
 
 	errTyp := true
-
 	one := true
+	isPtr := true
 
 	if val.Kind() == reflect.Ptr {
 		fn := ""
 		if ind.Kind() == reflect.Slice {
 			one = false
-			if ind.Type().Elem().Kind() == reflect.Ptr {
-				typ := ind.Type().Elem().Elem()
+			typ := ind.Type().Elem()
+			switch typ.Kind() {
+			case reflect.Ptr:
+				fn = getFullName(typ.Elem())
+			case reflect.Struct:
+				isPtr = false
 				fn = getFullName(typ)
 			}
 		} else {
@@ -497,17 +560,52 @@ func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condi
 	}
 
 	if errTyp {
-		panic(fmt.Sprintf("wrong object type `%s` for rows scan, need *[]*%s or *%s", ind.Type(), mi.fullName, mi.fullName))
+		if one {
+			panic(fmt.Errorf("wrong object type `%s` for rows scan, need *%s", val.Type(), mi.fullName))
+		} else {
+			panic(fmt.Errorf("wrong object type `%s` for rows scan, need *[]*%s or *[]%s", val.Type(), mi.fullName, mi.fullName))
+		}
 	}
 
 	rlimit := qs.limit
 	offset := qs.offset
-	if one {
-		rlimit = 0
-		offset = 0
-	}
 
 	Q := d.ins.TableQuote()
+
+	var tCols []string
+	if len(cols) > 0 {
+		hasRel := len(qs.related) > 0 || qs.relDepth > 0
+		tCols = make([]string, 0, len(cols))
+		var maps map[string]bool
+		if hasRel {
+			maps = make(map[string]bool)
+		}
+		for _, col := range cols {
+			if fi, ok := mi.fields.GetByAny(col); ok {
+				tCols = append(tCols, fi.column)
+				if hasRel {
+					maps[fi.column] = true
+				}
+			} else {
+				panic(fmt.Errorf("wrong field/column name `%s`", col))
+			}
+		}
+		if hasRel {
+			for _, fi := range mi.fields.fieldsDB {
+				if fi.fieldType&IsRelField > 0 {
+					if maps[fi.column] == false {
+						tCols = append(tCols, fi.column)
+					}
+				}
+			}
+		}
+	} else {
+		tCols = mi.fields.dbcols
+	}
+
+	colsNum := len(tCols)
+	sep := fmt.Sprintf("%s, T0.%s", Q, Q)
+	sels := fmt.Sprintf("T0.%s%s%s", Q, strings.Join(tCols, sep), Q)
 
 	tables := newDbTables(mi, d.ins)
 	tables.parseRelated(qs.related, qs.relDepth)
@@ -517,18 +615,15 @@ func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condi
 	limit := tables.getLimitSql(mi, offset, rlimit)
 	join := tables.getJoinSql()
 
-	colsNum := len(mi.fields.dbcols)
-	sep := fmt.Sprintf("%s, T0.%s", Q, Q)
-	cols := fmt.Sprintf("T0.%s%s%s", Q, strings.Join(mi.fields.dbcols, sep), Q)
 	for _, tbl := range tables.tables {
 		if tbl.sel {
 			colsNum += len(tbl.mi.fields.dbcols)
 			sep := fmt.Sprintf("%s, %s.%s", Q, tbl.index, Q)
-			cols += fmt.Sprintf(", %s.%s%s%s", tbl.index, Q, strings.Join(tbl.mi.fields.dbcols, sep), Q)
+			sels += fmt.Sprintf(", %s.%s%s%s", tbl.index, Q, strings.Join(tbl.mi.fields.dbcols, sep), Q)
 		}
 	}
 
-	query := fmt.Sprintf("SELECT %s FROM %s%s%s T0 %s%s%s%s", cols, Q, mi.table, Q, join, where, orderBy, limit)
+	query := fmt.Sprintf("SELECT %s FROM %s%s%s T0 %s%s%s%s", sels, Q, mi.table, Q, join, where, orderBy, limit)
 
 	d.ins.ReplaceMarks(&query)
 
@@ -561,14 +656,16 @@ func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condi
 			cacheM := make(map[string]*modelInfo)
 			trefs := refs
 
-			d.setColsValues(mi, &mind, mi.fields.dbcols, refs[:len(mi.fields.dbcols)], tz)
-			trefs = refs[len(mi.fields.dbcols):]
+			d.setColsValues(mi, &mind, tCols, refs[:len(tCols)], tz)
+			trefs = refs[len(tCols):]
 
 			for _, tbl := range tables.tables {
+				// loop selected tables
 				if tbl.sel {
 					last := mind
 					names := ""
 					mmi := mi
+					// loop cascade models
 					for _, name := range tbl.names {
 						names += name
 						if val, ok := cacheV[names]; ok {
@@ -577,38 +674,66 @@ func (d *dbBase) ReadBatch(q dbQuerier, qs *querySet, mi *modelInfo, cond *Condi
 						} else {
 							fi := mmi.fields.GetByName(name)
 							lastm := mmi
-							mmi := fi.relModelInfo
-							field := reflect.Indirect(last.Field(fi.fieldIndex))
-							if field.IsValid() {
-								d.setColsValues(mmi, &field, mmi.fields.dbcols, trefs[:len(mmi.fields.dbcols)], tz)
-								for _, fi := range mmi.fields.fieldsReverse {
-									if fi.reverseFieldInfo.mi == lastm {
-										if fi.reverseFieldInfo != nil {
-											field.Field(fi.fieldIndex).Set(last.Addr())
+							mmi = fi.relModelInfo
+							field := last
+							if last.Kind() != reflect.Invalid {
+								field = reflect.Indirect(last.Field(fi.fieldIndex))
+								if field.IsValid() {
+									d.setColsValues(mmi, &field, mmi.fields.dbcols, trefs[:len(mmi.fields.dbcols)], tz)
+									for _, fi := range mmi.fields.fieldsReverse {
+										if fi.inModel && fi.reverseFieldInfo.mi == lastm {
+											if fi.reverseFieldInfo != nil {
+												f := field.Field(fi.fieldIndex)
+												if f.Kind() == reflect.Ptr {
+													f.Set(last.Addr())
+												}
+											}
 										}
 									}
+									last = field
 								}
-								cacheV[names] = &field
-								cacheM[names] = mmi
-								last = field
 							}
-							trefs = trefs[len(mmi.fields.dbcols):]
+							cacheV[names] = &field
+							cacheM[names] = mmi
 						}
 					}
+					trefs = trefs[len(mmi.fields.dbcols):]
 				}
 			}
 
 			if one {
 				ind.Set(mind)
 			} else {
-				slice = reflect.Append(slice, mind.Addr())
+				if cnt == 0 {
+					// you can use a empty & caped container list
+					// orm will not replace it
+					if ind.Len() != 0 {
+						// if container is not empty
+						// create a new one
+						slice = reflect.New(ind.Type()).Elem()
+					}
+				}
+
+				if isPtr {
+					slice = reflect.Append(slice, mind.Addr())
+				} else {
+					slice = reflect.Append(slice, mind)
+				}
 			}
 		}
 		cnt++
 	}
 
 	if one == false {
-		ind.Set(slice)
+		if cnt > 0 {
+			ind.Set(slice)
+		} else {
+			// when a result is empty and container is nil
+			// to set a empty container
+			if ind.IsNil() {
+				ind.Set(reflect.MakeSlice(ind.Type(), 0, 0))
+			}
+		}
 	}
 
 	return cnt, nil
@@ -639,7 +764,7 @@ func (d *dbBase) GenerateOperatorSql(mi *modelInfo, fi *fieldInfo, operator stri
 	params := getFlatParams(fi, args, tz)
 
 	if len(params) == 0 {
-		panic(fmt.Sprintf("operator `%s` need at least one args", operator))
+		panic(fmt.Errorf("operator `%s` need at least one args", operator))
 	}
 	arg := params[0]
 
@@ -651,7 +776,7 @@ func (d *dbBase) GenerateOperatorSql(mi *modelInfo, fi *fieldInfo, operator stri
 		sql = fmt.Sprintf("IN (%s)", strings.Join(marks, ", "))
 	} else {
 		if len(params) > 1 {
-			panic(fmt.Sprintf("operator `%s` need 1 args not %d", operator, len(params)))
+			panic(fmt.Errorf("operator `%s` need 1 args not %d", operator, len(params)))
 		}
 		sql = d.ins.OperatorSql(operator)
 		switch operator {
@@ -680,7 +805,7 @@ func (d *dbBase) GenerateOperatorSql(mi *modelInfo, fi *fieldInfo, operator stri
 				}
 				params = nil
 			} else {
-				panic(fmt.Sprintf("operator `%s` need a bool value not `%T`", operator, arg))
+				panic(fmt.Errorf("operator `%s` need a bool value not `%T`", operator, arg))
 			}
 		}
 	}
@@ -701,13 +826,13 @@ func (d *dbBase) setColsValues(mi *modelInfo, ind *reflect.Value, cols []string,
 
 		value, err := d.convertValueFromDB(fi, val, tz)
 		if err != nil {
-			panic(fmt.Sprintf("Raw value: `%v` %s", val, err.Error()))
+			panic(fmt.Errorf("Raw value: `%v` %s", val, err.Error()))
 		}
 
-		_, err = d.setFieldValue(fi, value, &field)
+		_, err = d.setFieldValue(fi, value, field)
 
 		if err != nil {
-			panic(fmt.Sprintf("Raw value: `%v` %s", val, err.Error()))
+			panic(fmt.Errorf("Raw value: `%v` %s", val, err.Error()))
 		}
 	}
 }
@@ -776,17 +901,17 @@ setValue:
 				t   time.Time
 				err error
 			)
-			if fi.fieldType == TypeDateField {
+			if len(s) >= 19 {
+				s = s[:19]
+				t, err = time.ParseInLocation(format_DateTime, s, tz)
+			} else {
 				if len(s) > 10 {
 					s = s[:10]
 				}
-				t, err = time.ParseInLocation(format_Date, s, DefaultTimeLoc)
-			} else {
-				if len(s) > 19 {
-					s = s[:19]
-				}
-				t, err = time.ParseInLocation(format_DateTime, s, tz)
+				t, err = time.ParseInLocation(format_Date, s, tz)
 			}
+			t = t.In(DefaultTimeLoc)
+
 			if err != nil && s != "0000-00-00" && s != "0000-00-00 00:00:00" {
 				tErr = err
 				goto end
@@ -864,7 +989,7 @@ end:
 
 }
 
-func (d *dbBase) setFieldValue(fi *fieldInfo, value interface{}, field *reflect.Value) (interface{}, error) {
+func (d *dbBase) setFieldValue(fi *fieldInfo, value interface{}, field reflect.Value) (interface{}, error) {
 
 	fieldType := fi.fieldType
 	isNative := fi.isFielder == false
@@ -921,7 +1046,7 @@ setValue:
 			mf := reflect.New(fi.relModelInfo.addrField.Elem().Type())
 			field.Set(mf)
 			f := mf.Elem().Field(fi.relModelInfo.fields.pk.fieldIndex)
-			field = &f
+			field = f
 			goto setValue
 		}
 	}
@@ -947,15 +1072,27 @@ func (d *dbBase) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Cond
 	)
 
 	typ := 0
-	switch container.(type) {
+	switch v := container.(type) {
 	case *[]Params:
+		d := *v
+		if len(d) == 0 {
+			maps = d
+		}
 		typ = 1
 	case *[]ParamsList:
+		d := *v
+		if len(d) == 0 {
+			lists = d
+		}
 		typ = 2
 	case *ParamsList:
+		d := *v
+		if len(d) == 0 {
+			list = d
+		}
 		typ = 3
 	default:
-		panic(fmt.Sprintf("unsupport read values type `%T`", container))
+		panic(fmt.Errorf("unsupport read values type `%T`", container))
 	}
 
 	tables := newDbTables(mi, d.ins)
@@ -1038,7 +1175,7 @@ func (d *dbBase) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Cond
 
 				value, err := d.convertValueFromDB(fi, val, tz)
 				if err != nil {
-					panic(fmt.Sprintf("db value convert failed `%v` %s", val, err.Error()))
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
 				}
 
 				params[columns[i]] = value
@@ -1053,7 +1190,7 @@ func (d *dbBase) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Cond
 
 				value, err := d.convertValueFromDB(fi, val, tz)
 				if err != nil {
-					panic(fmt.Sprintf("db value convert failed `%v` %s", val, err.Error()))
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
 				}
 
 				params = append(params, value)
@@ -1067,7 +1204,7 @@ func (d *dbBase) ReadValues(q dbQuerier, qs *querySet, mi *modelInfo, cond *Cond
 
 				value, err := d.convertValueFromDB(fi, val, tz)
 				if err != nil {
-					panic(fmt.Sprintf("db value convert failed `%v` %s", val, err.Error()))
+					panic(fmt.Errorf("db value convert failed `%v` %s", val, err.Error()))
 				}
 
 				list = append(list, value)

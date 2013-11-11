@@ -16,7 +16,7 @@ type Data struct {
 	Char     string    `orm:"size(50)"`
 	Text     string    `orm:"type(text)"`
 	Date     time.Time `orm:"type(date)"`
-	DateTime time.Time
+	DateTime time.Time `orm:"column(datetime)"`
 	Byte     byte
 	Rune     rune
 	Int      int
@@ -37,10 +37,10 @@ type Data struct {
 type DataNull struct {
 	Id       int
 	Boolean  bool      `orm:"null"`
-	Char     string    `orm:"size(50);null"`
-	Text     string    `orm:"type(text);null"`
-	Date     time.Time `orm:"type(date);null"`
-	DateTime time.Time `orm:"null"`
+	Char     string    `orm:"null;size(50)"`
+	Text     string    `orm:"null;type(text)"`
+	Date     time.Time `orm:"null;type(date)"`
+	DateTime time.Time `orm:"null;column(datetime)""`
 	Byte     byte      `orm:"null"`
 	Rune     rune      `orm:"null"`
 	Int      int       `orm:"null"`
@@ -77,6 +77,7 @@ type User struct {
 	Profile    *Profile  `orm:"null;rel(one);on_delete(set_null)"`
 	Posts      []*Post   `orm:"reverse(many)" json:"-"`
 	ShouldSkip string    `orm:"-"`
+	Nums       int
 }
 
 func (u *User) TableIndex() [][]string {
@@ -98,10 +99,11 @@ func NewUser() *User {
 }
 
 type Profile struct {
-	Id    int
-	Age   int16
-	Money float64
-	User  *User `orm:"reverse(one)" json:"-"`
+	Id       int
+	Age      int16
+	Money    float64
+	User     *User `orm:"reverse(one)" json:"-"`
+	BestPost *Post `orm:"rel(one);null"`
 }
 
 func (u *Profile) TableName() string {
@@ -135,9 +137,10 @@ func NewPost() *Post {
 }
 
 type Tag struct {
-	Id    int
-	Name  string  `orm:"size(30)"`
-	Posts []*Post `orm:"reverse(many)" json:"-"`
+	Id       int
+	Name     string  `orm:"size(30)"`
+	BestPost *Post   `orm:"rel(one);null"`
+	Posts    []*Post `orm:"reverse(many)" json:"-"`
 }
 
 func NewTag() *Tag {
@@ -147,7 +150,7 @@ func NewTag() *Tag {
 
 type Comment struct {
 	Id      int
-	Post    *Post     `orm:"rel(fk)"`
+	Post    *Post     `orm:"rel(fk);column(post)"`
 	Content string    `orm:"type(text)"`
 	Parent  *Comment  `orm:"null;rel(fk)"`
 	Created time.Time `orm:"auto_now_add"`
@@ -174,7 +177,10 @@ var (
 	IsPostgres = DBARGS.Driver == "postgres"
 )
 
-var dORM Ormer
+var (
+	dORM     Ormer
+	dDbBaser dbBaser
+)
 
 func init() {
 	Debug, _ = StrTo(DBARGS.Debug).Bool()
@@ -220,4 +226,10 @@ go test -v github.com/astaxie/beego/orm
 	}
 
 	RegisterDataBase("default", DBARGS.Driver, DBARGS.Source, 20)
+
+	alias := getDbAlias("default")
+	if alias.Driver == DR_MySQL {
+		alias.Engine = "INNODB"
+	}
+
 }
